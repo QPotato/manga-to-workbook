@@ -47,14 +47,14 @@ h1 { font-size: 22pt; }
 .ex .instr { color: #666; font-size: 9.5pt; margin-bottom: 6px; }
 .ex ol, .ex .grid { list-style: none; padding: 0; margin: 0; }
 .ex .grid { display: flex; flex-wrap: wrap; gap: 6px 18px; }
-.ex .item { break-inside: avoid; padding: 3px 0; min-width: 0; }
-.ex .grid .item { flex: 1 1 30%; }
+.ex .item { break-inside: avoid; padding: 3px 0 22px; min-width: 0; }
+.ex .grid .item { flex: 1 1 30%; padding-bottom: 16px; }
 .qn { color: #888; font-weight: bold; margin-right: 4px; }
 .big { font-size: 13pt; }
 .blank { display: inline-block; min-width: 90px; border-bottom: 1px solid #999; }
 .bank { color: #557; font-size: 9.5pt; margin-left: 8px; }
 .answers .sec h2 { font-size: 12pt; }
-.answers .item { font-size: 10pt; }
+.answers .item { font-size: 10pt; padding: 2px 0; }
 """
 
 
