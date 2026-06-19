@@ -1,7 +1,8 @@
 """Assemble the workbook data structure from OCR boxes + cleaned images."""
 from collections import Counter
 
-from .language import extract_words, furigana_html
+from .exercises import build_exercises
+from .language import extract_words, furigana_html, tokens as tokenize
 
 
 def _dedupe(seq):
@@ -37,7 +38,8 @@ def build_workbook(ordered_files, ocr_pages, cleaned_map, chapter="chapter",
             text = box["text"].strip()
             if not text:
                 continue
-            dialog.append({"plain": text, "furigana": furigana_html(text), "en": ""})
+            dialog.append({"plain": text, "furigana": furigana_html(text), "en": "",
+                           "tokens": tokenize(text)})
             w = extract_words(text)
             verbs += w["verbs"]
             nouns += w["nouns"]
@@ -75,4 +77,6 @@ def build_workbook(ordered_files, ocr_pages, cleaned_map, chapter="chapter",
         "nouns": enrich([w for w, _ in chapter_nouns.most_common(30)]),
         "adjectives": enrich([w for w, _ in chapter_adjs.most_common(20)]),
     }
-    return {"chapter": chapter, "summary_vocab": summary, "pages": pages}
+    wb = {"chapter": chapter, "summary_vocab": summary, "pages": pages}
+    wb["exercises"] = build_exercises(wb)
+    return wb

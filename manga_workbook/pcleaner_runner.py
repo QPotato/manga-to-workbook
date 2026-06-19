@@ -95,7 +95,30 @@ def ocr_dir(input_dir: Path, csv_path: Path, on_progress=None) -> dict:
                     "text": row["text"],
                 }
             )
-    return pages
+    return {fname: _reading_order(boxes) for fname, boxes in pages.items()}
+
+
+def _reading_order(boxes):
+    """Sort text boxes into manga reading order: top-to-bottom rows, and within
+    each row right-to-left. Boxes whose vertical centers are close form one row."""
+    if not boxes:
+        return boxes
+    heights = sorted(b["y2"] - b["y1"] for b in boxes)
+    band = max(20, heights[len(heights) // 2] * 0.6)  # ~half a typical box height
+    rows = []
+    for b in sorted(boxes, key=lambda b: (b["y1"] + b["y2"]) / 2):
+        cy = (b["y1"] + b["y2"]) / 2
+        for row in rows:
+            if abs(cy - row["cy"]) <= band:
+                row["items"].append(b)
+                break
+        else:
+            rows.append({"cy": cy, "items": [b]})
+    ordered = []
+    for row in rows:
+        row["items"].sort(key=lambda b: -b["x2"])  # right edge first = right-to-left
+        ordered += row["items"]
+    return ordered
 
 
 def clean_dir(input_dir: Path, out_dir: Path, on_progress=None) -> dict:

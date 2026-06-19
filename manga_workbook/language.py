@@ -45,6 +45,22 @@ def furigana_html(text: str) -> str:
     return "".join(out)
 
 
+def tokens(text: str) -> list:
+    """OCR line -> list of {s:surface, l:lemma, r:reading_hira, p:pos1, p2:pos2}.
+    Used to build offline exercises (conjugation, particle blanks, fill-in-the-blank)."""
+    out = []
+    for w in tagger()(text):
+        f = w.feature
+        out.append({
+            "s": w.surface,
+            "l": getattr(f, "lemma", None) or w.surface,
+            "r": _reading(f) or "",
+            "p": f.pos1,
+            "p2": f.pos2,
+        })
+    return out
+
+
 def extract_words(text: str) -> dict:
     """OCR line -> {verbs, nouns, adjectives}. Verbs/adjectives as dictionary form."""
     words = {"verbs": [], "nouns": [], "adjectives": []}
