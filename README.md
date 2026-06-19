@@ -1,3 +1,13 @@
+---
+title: Manga To Workbook
+emoji: 📖
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Manga → Japanese Study Workbook
 
 Turn a manga chapter (a folder of page images) into a printable Japanese study

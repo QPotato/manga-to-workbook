@@ -148,5 +148,9 @@ def result(job_id):
 
 
 if __name__ == "__main__":
+    import os
+
+    # 0.0.0.0 so it works inside a container; PORT is set by the host (HF uses 7860).
+    port = int(os.environ.get("PORT", "5000"))
     # threaded=True so SSE stream + the worker thread + downloads run concurrently
-    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

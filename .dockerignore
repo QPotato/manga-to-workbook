@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+out/
+work/
+*.pdf
+manga/
+dungeon-meshi-chapter-1/
+PanelCleaner/
+manga-ocr/
+furigana/
+.git/
