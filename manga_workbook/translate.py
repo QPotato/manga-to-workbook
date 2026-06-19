@@ -15,9 +15,11 @@ def _clean(s: str) -> str:
 
 @lru_cache(maxsize=1)
 def _pipe():
+    import torch
     from transformers import pipeline
 
-    return pipeline("translation", model=MODEL, device=-1)
+    device = 0 if torch.cuda.is_available() else -1  # use GPU when present
+    return pipeline("translation", model=MODEL, device=device)
 
 
 def translate_lines(lines):

@@ -13,7 +13,8 @@ from weasyprint import HTML
 CSS = """
 @page { size: A4 landscape; margin: 10mm; }
 * { box-sizing: border-box; }
-body { font-family: "Noto Sans CJK JP", "Noto Serif CJK JP", sans-serif; color: #111; }
+body { font-family: "Noto Sans CJK JP", "Noto Serif CJK JP", "Yu Gothic",
+       "Meiryo", "MS Gothic", sans-serif; color: #111; }
 ruby rt { font-size: 0.55em; }
 h1 { font-size: 22pt; }
 .summary h1 { margin-bottom: 10px; }
