@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+work/
+out/
+CLAUDE.md
+booklet.pdf
+workbook.pdf
+booklet_sample.pdf
+
+# unused cloned upstream tools (installed from PyPI instead)
+PanelCleaner/
+manga-ocr/
+furigana/
+
+# copyrighted sample manga — do not publish
+dungeon-meshi-chapter-1/
+manga/

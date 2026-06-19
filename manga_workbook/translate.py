@@ -1,0 +1,37 @@
+"""Offline JA->EN translation via Helsinki-NLP/opus-mt-ja-en (CPU, no API key)."""
+import html
+import re
+from functools import lru_cache
+
+MODEL = "Helsinki-NLP/opus-mt-ja-en"
+
+_TAG = re.compile(r"</?[a-zA-Z][^>]*>")
+
+
+def _clean(s: str) -> str:
+    # opus-mt sometimes emits stray <i>..</i> markup or HTML entities; drop them.
+    return html.unescape(_TAG.sub("", s)).strip()
+
+
+@lru_cache(maxsize=1)
+def _pipe():
+    from transformers import pipeline
+
+    return pipeline("translation", model=MODEL, device=-1)
+
+
+def translate_lines(lines):
+    """Translate a list of dialogue lines. Returns a list of EN strings (same length).
+
+    Batched in one call so the model sees the page together (better than one-by-one),
+    while still mapping each source line to its own translation.
+    """
+    lines = [ln.strip() for ln in lines]
+    idx = [i for i, ln in enumerate(lines) if ln]
+    out = [""] * len(lines)
+    if not idx:
+        return out
+    results = _pipe()([lines[i] for i in idx], max_length=128)
+    for i, r in zip(idx, results):
+        out[i] = _clean(r["translation_text"])
+    return out
