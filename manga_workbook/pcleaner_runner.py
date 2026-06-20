@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from PIL import Image
+
 VENV_BIN = Path(sys.executable).parent
 PCLEANER = str(VENV_BIN / "pcleaner")
 
@@ -95,7 +97,36 @@ def ocr_dir(input_dir: Path, csv_path: Path, on_progress=None) -> dict:
                     "text": row["text"],
                 }
             )
-    return {fname: _reading_order(boxes) for fname, boxes in pages.items()}
+    result = {}
+    for fname, boxes in pages.items():
+        pw, ph = _page_size(input_dir / fname)
+        kept = [b for b in boxes if not _is_banner_box(b, pw, ph)]
+        result[fname] = _reading_order(kept)
+    return result
+
+
+# Cover/spine/banner display text: extreme aspect ratio + large. manga-ocr is
+# trained on speech bubbles and badly garbles these (e.g. コードギアス spine ->
+# "コードやアス、髪型ルーション"), so they poison furigana/vocab/translation. Drop them.
+_BANNER_ASPECT = 6.0     # long:short side ratio
+_BANNER_LONGSIDE = 0.4   # long side as a fraction of the page
+
+
+def _page_size(path: Path):
+    try:
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return (0, 0)  # unknown -> filter no-ops, keep the box
+
+
+def _is_banner_box(box, page_w, page_h) -> bool:
+    w, h = box["x2"] - box["x1"], box["y2"] - box["y1"]
+    if w <= 0 or h <= 0 or page_w <= 0 or page_h <= 0:
+        return False
+    aspect = max(w / h, h / w)
+    longside = max(w / page_w, h / page_h)
+    return aspect >= _BANNER_ASPECT and longside >= _BANNER_LONGSIDE
 
 
 def _reading_order(boxes):
