@@ -1,9 +1,17 @@
 """Okurigana-aware furigana splitting. Maps a reading onto the kanji core of a token."""
+import re
+
 import jaconv
+
+_DIGIT = re.compile(r"[0-9０-９]")
 
 
 def kata_to_hira(s: str) -> str:
     return jaconv.kata2hira(s)
+
+
+def has_digit(s: str) -> bool:
+    return bool(_DIGIT.search(s))
 
 
 def is_kanji(ch: str) -> bool:
@@ -20,7 +28,11 @@ def split_furigana(surface: str, reading_hira: str | None):
     Strips matching leading/trailing kana (okurigana) so the ruby sits only on the
     kanji core. Compounds without okurigana get one ruby over the whole word.
     """
-    if not has_kanji(surface) or not reading_hira:
+    # Tokens mixing a digit with kanji (１日, ３日) fuse in unidic to a calendar
+    # reading (１日 -> ついたち) that is wrong for the usual counter/duration sense.
+    # Counter readings are context-dependent and unreliable, so show no furigana
+    # rather than a wrong one; the digit itself never needs kana.
+    if not has_kanji(surface) or not reading_hira or has_digit(surface):
         return [(surface, None)]
 
     s, r = surface, reading_hira
