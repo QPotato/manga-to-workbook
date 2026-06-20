@@ -9,6 +9,8 @@ transformers==4.57.6   # pinned <5: manga-ocr needs ViTImageProcessor
 fugashi==1.5.2
 unidic-lite==1.0.8
 jaconv==0.5.0
+jamdict==0.1a11.post2   # offline JMdict JA->EN glosses for vocab lists
+jamdict-data==1.5       # bundled JMdict database (~125 MB)
 sacremoses==0.1.1       # opus-mt-ja-en tokenizer
 sentencepiece==0.2.1    # opus-mt-ja-en tokenizer
 weasyprint==69.0

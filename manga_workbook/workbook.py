@@ -1,6 +1,7 @@
 """Assemble the workbook data structure from OCR boxes + cleaned images."""
 from collections import Counter
 
+from .dictionary import gloss as dict_gloss
 from .exercises import build_exercises
 from .language import extract_words, furigana_html, tokens as tokenize
 
@@ -65,17 +66,18 @@ def build_workbook(ordered_files, ocr_pages, cleaned_map, chapter="chapter",
             }
         )
 
-    def enrich(words):
-        ens = translate_lines(words) if (translate and words) else [""] * len(words)
+    def enrich(words, category):
+        # Dictionary glosses (offline JMdict), not opus-mt: single words need a
+        # dictionary, not a sentence translator. Always on; needs no torch.
         return [
-            {"word": w, "furigana": furigana_html(w), "en": en}
-            for w, en in zip(words, ens)
+            {"word": w, "furigana": furigana_html(w), "en": dict_gloss(w, category)}
+            for w in words
         ]
 
     summary = {
-        "verbs": enrich([w for w, _ in chapter_verbs.most_common(20)]),
-        "nouns": enrich([w for w, _ in chapter_nouns.most_common(30)]),
-        "adjectives": enrich([w for w, _ in chapter_adjs.most_common(20)]),
+        "verbs": enrich([w for w, _ in chapter_verbs.most_common(20)], "verbs"),
+        "nouns": enrich([w for w, _ in chapter_nouns.most_common(30)], "nouns"),
+        "adjectives": enrich([w for w, _ in chapter_adjs.most_common(20)], "adjectives"),
     }
     wb = {"chapter": chapter, "summary_vocab": summary, "pages": pages}
     wb["exercises"] = build_exercises(wb)
