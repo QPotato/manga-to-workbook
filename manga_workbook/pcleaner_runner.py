@@ -130,24 +130,30 @@ def _is_banner_box(box, page_w, page_h) -> bool:
 
 
 def _reading_order(boxes):
-    """Sort text boxes into manga reading order: top-to-bottom rows, and within
-    each row right-to-left. Boxes whose vertical centers are close form one row."""
+    """Sort text boxes into manga reading order: top-to-bottom tiers, each read
+    right-to-left. Boxes whose vertical centers fall within ~one line height form
+    one tier, and the tier centroid updates as boxes join so a tier with mildly
+    varying bubble heights stays together instead of splitting into top-to-bottom
+    singletons (which would break the right-to-left order). Complex multi-character
+    pages still need panel detection for perfect order."""
     if not boxes:
         return boxes
     heights = sorted(b["y2"] - b["y1"] for b in boxes)
-    band = max(20, heights[len(heights) // 2] * 0.6)  # ~half a typical box height
+    band = max(20, heights[len(heights) // 2])  # ~one median box height
     rows = []
     for b in sorted(boxes, key=lambda b: (b["y1"] + b["y2"]) / 2):
         cy = (b["y1"] + b["y2"]) / 2
         for row in rows:
             if abs(cy - row["cy"]) <= band:
                 row["items"].append(b)
+                row["cy"] = sum((x["y1"] + x["y2"]) / 2 for x in row["items"]) / len(row["items"])
                 break
         else:
             rows.append({"cy": cy, "items": [b]})
+    rows.sort(key=lambda r: r["cy"])
     ordered = []
     for row in rows:
-        row["items"].sort(key=lambda b: -b["x2"])  # right edge first = right-to-left
+        row["items"].sort(key=lambda b: (-b["x2"], b["y1"]))  # right edge first, then top
         ordered += row["items"]
     return ordered
 
