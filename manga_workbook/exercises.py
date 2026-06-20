@@ -24,6 +24,19 @@ def _has_kanji(furigana_html: str) -> bool:
     return "<ruby>" in furigana_html
 
 
+def _real_word_token(t) -> bool:
+    """A token whose surface is a standalone word, safe to blank as a fill answer:
+    a noun, or a verb/adjective already in dictionary form. Conjugation stems
+    (撃た, 見つから, 聞き) are excluded — their bare surface isn't a real word."""
+    if len(t["s"]) < 2:
+        return False
+    if t["p"] == "名詞":
+        return t["p2"] not in ("数詞", "代名詞")  # skip numbers / pronouns
+    if t["p"] in ("動詞", "形容詞"):
+        return t["s"] == t["l"]  # only uninflected (dictionary) forms
+    return False
+
+
 def _all_lines(wb):
     lines = []
     for pi, page in enumerate(wb["pages"]):
@@ -85,7 +98,7 @@ def build_exercises(wb):
     # 4. Fill-in-the-blank: blank a noun/verb in a line, give a small word bank.
     fill = []
     cand = [(pi, d, t) for pi, d in lines for t in d["tokens"]
-            if t["p"] in ("名詞", "動詞") and len(t["s"]) >= 2 and t["s"] in d["plain"]]
+            if _real_word_token(t) and t["s"] in d["plain"]]
     rng.shuffle(cand)
     used_lines = set()
     bank_pool = list({t["s"] for _, _, t in cand})
