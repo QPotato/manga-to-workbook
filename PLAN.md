@@ -120,3 +120,67 @@ answerKey: { ... }   // mirrors exercises, rendered as final appendix
 - Reading order from box coords reliable? May need right-to-left sort heuristic.
 - PanelCleaner CLI vs Python API — pick whichever exposes boxes + mask cleanly.
 - Verb lemmatization: unidic gives lemma directly — verify covers conjugations.
+
+---
+
+## Roadmap — planned features
+
+All build on the existing `workbook.json` (furigana, JMdict glosses, tokens,
+exercises, + optional `claude -p` corrections/translations/questions). Ordered
+by build dependency, with the primary goal (kanji writing) called out.
+
+### 0. Interactive HTML reader (foundation — build first)
+Flask already serves; add a browser view of `workbook.json` (not just the PDF).
+- Furigana **toggle** (hide readings → self-test → reveal), hover-for-gloss,
+  exercise answer-reveal, "quiz/test" mode (readings + EN hidden).
+- `@media print` stylesheet so any view (incl. the writing sheets below) prints
+  to paper. This view is the host for kanji practice, audio, and quiz mode.
+
+### 1. Kanji writing practice ★ PRIMARY GOAL (on the HTML reader)
+Pull target kanji from the chapter's vocab/dialogue (practice them in context,
+not isolated). Per kanji, a **practice cell**:
+- genkō-yōshi (原稿用紙) square + cross guide-lines,
+- faint **trace template** + **animated stroke order** from **KanjiVG**
+  (open-source SVG stroke data, ~11k kanji, CC-BY-SA; files named by unicode
+  codepoint; bundle the chapter's subset),
+- a `<canvas>` overlay for pointer/touch/stylus drawing (clear/undo).
+- Row progression **trace → freehand-in-grid → recall** (template fades across cells).
+- **Print mode**: `@media print` hides canvas/buttons, prints guide + blank
+  squares as a paper worksheet. One source → on-screen (stylus) or paper (pen).
+- Static **stroke-order display** (numbered) can also drop into the PDF.
+- Later (optional, hard): handwriting recognition/grading — skip for v1.
+
+### 2. Anki export (high ROI, low effort)
+`.apkg` via `genanki` from data we already have: vocab cards
+(word → reading + gloss + EN), sentence cards, and cloze cards from the furigana.
+Optionally include audio (below) and the kanji stroke-order image.
+
+### 3. JLPT tagging
+Annotate vocab chips + kanji with N5–N1 level: kanjidic2 (grade/JLPT/frequency,
+via jamdict) for kanji; a JLPT vocab wordlist for words. Enables level filtering
+and difficulty display; feeds "new kanji this chapter" for the writing drills.
+
+### 4. TTS audio (in the HTML reader)
+Per-line + per-word playback. Offline via local **VOICEVOX** or `pyopenjtalk`;
+attach to the reader (and optionally Anki cards). Needs the HTML reader (PDF
+can't play audio).
+
+### 5. Genkō-yōshi grids / handwriting sheets
+Reusable squared-paper component for the writing cells (#1) and a general
+sentence-copying practice section. Cheap CSS; prints cleanly.
+
+### 6. Extend the LLM call (near-free — same request)
+The `claude -p` correction call already runs per page; add output fields for
+**correct context-dependent readings** (fixes the `1日→ついたち` counter residual
+left by the heuristic) and **one-line grammar notes** per page (〜ている, passive/
+causative, conditionals, …).
+
+### 7. Pipeline: cache + panel-aware order
+- Cache OCR + cleaned images per chapter so toggling the LLM or re-rendering
+  doesn't redo the slow stages (saves time and `claude` cost).
+- Panel-aware reading order (panel segmentation, or let the LLM order boxes) for
+  busy multi-panel pages the row-band heuristic still mis-orders.
+
+### Build order
+HTML reader (0) → kanji writing practice (1) → Anki (2) → JLPT (3) →
+TTS (4) / genkō grids (5) → LLM extension (6) → caching + panel order (7).
