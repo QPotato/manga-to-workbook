@@ -53,6 +53,8 @@ h1 { font-size: 22pt; }
 .bank { color: #557; font-size: 9.5pt; margin-left: 8px; }
 .answers .sec h2 { font-size: 12pt; }
 .answers .item { font-size: 10pt; padding: 2px 0; }
+.q .item { padding: 4px 0 8px; }
+.q .write { height: 56px; border-bottom: 1px solid #ccc; margin-top: 4px; }
 """
 
 
@@ -150,6 +152,27 @@ def _answers_section(ex):
     return f'<section class="ex answers page"><h1>Answer Key 解答</h1>{"".join(blocks)}</section>'
 
 
+def _questions_section(questions):
+    # The "final section with questions about what happens" (CLAUDE.md), with
+    # writing space; the answer key for these is appended after the exercise key.
+    items = "".join(
+        f'<li class="item"><span class="qn">{i}.</span> {_esc(q["q"])}<div class="write"></div></li>'
+        for i, q in enumerate(questions, 1)
+    )
+    return ('<section class="ex q page"><h1>Comprehension 内容理解</h1>'
+            '<div class="instr">Answer in English or Japanese.</div>'
+            f'<ol class="list">{items}</ol></section>')
+
+
+def _question_answers(questions):
+    items = "".join(
+        f'<li class="item"><span class="qn">{i}.</span> {_esc(q["q"])} &mdash; {_esc(q["a"])}</li>'
+        for i, q in enumerate(questions, 1)
+    )
+    return ('<section class="ex answers page"><h1>Comprehension answers 解答</h1>'
+            f'<ol>{items}</ol></section>')
+
+
 def _wrap(inner):
     return (f"<html><head><meta charset='utf-8'><style>{CSS}</style></head>"
             f"<body>{inner}</body></html>")
@@ -162,8 +185,15 @@ def render_pdf(workbook: dict, original_dir, out_pdf):
     body = [_page_sections(p, original_dir) for p in workbook["pages"]]
     body.append(_summary_section(workbook["summary_vocab"]))
     ex = workbook.get("exercises")
+    questions = workbook.get("questions")
+    # Worksheets first (exercises, then comprehension), answer keys last.
     if ex and ex.get("sections"):
         body.append(_exercise_section(ex))
+    if questions:
+        body.append(_questions_section(questions))
+    if ex and ex.get("sections"):
         body.append(_answers_section(ex))
+    if questions:
+        body.append(_question_answers(questions))
     HTML(string=_wrap("".join(body))).write_pdf(str(out_pdf))
     return out_pdf
