@@ -6,6 +6,12 @@ from .exercises import build_exercises
 from .language import extract_words, furigana_html, tokens as tokenize
 
 
+# Cap each per-page header word list so text-dense pages (covers, splash pages)
+# don't wrap into a tall header that squeezes the panels. The full, frequency-
+# ranked vocabulary still appears on the summary page.
+HEADER_MAX = 16
+
+
 def _dedupe(seq):
     seen = set()
     out = []
@@ -58,9 +64,9 @@ def build_workbook(ordered_files, ocr_pages, cleaned_map, chapter="chapter",
                 "filename": fname,
                 "cleaned_path": str(cleaned_map.get(fname, "")),
                 "header": {
-                    "verbs": [furigana_html(w) for w in _dedupe(verbs)],
-                    "nouns": [furigana_html(w) for w in _dedupe(nouns)],
-                    "adjectives": [furigana_html(w) for w in _dedupe(adjs)],
+                    "verbs": [furigana_html(w) for w in _dedupe(verbs)[:HEADER_MAX]],
+                    "nouns": [furigana_html(w) for w in _dedupe(nouns)[:HEADER_MAX]],
+                    "adjectives": [furigana_html(w) for w in _dedupe(adjs)[:HEADER_MAX]],
                 },
                 "dialog": dialog,
             }
