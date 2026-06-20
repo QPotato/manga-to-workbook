@@ -35,7 +35,6 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
  #opts{margin:14px 0;font-size:14px;color:#444}
  #llmopts{margin:8px 0 0 22px}
  select{padding:6px;font-size:14px}
- #key{width:100%;margin-top:6px;padding:8px;font-size:14px;box-sizing:border-box}
  .hint{font-size:12px;color:#888;margin:4px 0 0}
 </style></head><body>
 <h1>Manga &rarr; Japanese Study Workbook</h1>
@@ -49,13 +48,12 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
     <div id="llmopts">
       <label>Model
         <select id="model">
-          <option value="claude-opus-4-8">Opus 4.8 (best)</option>
-          <option value="claude-sonnet-4-6">Sonnet 4.6 (cheaper)</option>
-          <option value="claude-haiku-4-5">Haiku 4.5 (cheapest)</option>
+          <option value="sonnet">Sonnet (cheaper)</option>
+          <option value="opus">Opus (best)</option>
+          <option value="haiku">Haiku (cheapest)</option>
         </select>
       </label>
-      <input id="key" type="password" placeholder="Anthropic API key (sk-ant-...)" autocomplete="off">
-      <p class="hint">Used for this build only &mdash; not stored. Costs scale with page count.</p>
+      <p class="hint">Uses your local Claude Code login (the <code>claude</code> CLI). Runs locally; cost is billed to that account.</p>
     </div>
   </div>
   <button id="go" type="submit" disabled>Build workbook PDF</button>
@@ -68,7 +66,7 @@ const drop=document.getElementById('drop'),file=document.getElementById('file'),
  bar=document.getElementById('bar'),fill=document.getElementById('fill'),
  msg=document.getElementById('msg'),f=document.getElementById('f'),
  llm=document.getElementById('llm'),llmopts=document.getElementById('llmopts'),
- model=document.getElementById('model'),key=document.getElementById('key');
+ model=document.getElementById('model');
 llmopts.style.display='none';
 llm.onchange=()=>{llmopts.style.display=llm.checked?'block':'none'};
 let files=[];
@@ -83,9 +81,8 @@ drop.ondragleave=()=>drop.classList.remove('over');
 drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');setFiles(e.dataTransfer.files)};
 f.onsubmit=async e=>{e.preventDefault();go.disabled=true;bar.style.display='block';
   fill.style.width='0';msg.textContent='Uploading '+files.length+' images...';
-  if(llm.checked&&!key.value.trim()){msg.textContent='Enter an Anthropic API key or uncheck AI.';go.disabled=false;return;}
   const fd=new FormData();files.forEach(x=>fd.append('images',x,x.name));
-  if(llm.checked){fd.append('llm','1');fd.append('model',model.value);fd.append('key',key.value.trim());}
+  if(llm.checked){fd.append('llm','1');fd.append('model',model.value);}
   let job;
   try{const r=await fetch('/build',{method:'POST',body:fd});
     if(!r.ok){msg.textContent='Error: '+(await r.text());go.disabled=false;return;}
@@ -104,7 +101,7 @@ f.onsubmit=async e=>{e.preventDefault();go.disabled=true;bar.style.display='bloc
 </script></body></html>"""
 
 
-def _worker(job_id, in_dir, work_dir, out_pdf, use_llm=False, model=None, api_key=None):
+def _worker(job_id, in_dir, work_dir, out_pdf, use_llm=False, model=None):
     job = JOBS[job_id]
 
     def progress(frac, m):
@@ -112,7 +109,7 @@ def _worker(job_id, in_dir, work_dir, out_pdf, use_llm=False, model=None, api_ke
 
     try:
         run(in_dir, work_dir, out_pdf, progress=progress,
-            with_llm=use_llm, llm_model=model, api_key=api_key)
+            with_llm=use_llm, llm_model=model)
         job["pdf"] = out_pdf
         job["q"].put({"done": True, "frac": 1.0, "msg": "Done."})
     except Exception as e:
@@ -136,12 +133,8 @@ def build():
 
     use_llm = request.form.get("llm") == "1"
     model = request.form.get("model") or None
-    api_key = request.form.get("key") or None
-    if use_llm:
-        if model not in ALLOWED_MODELS:
-            return Response("Unknown AI model.", status=400)
-        if not api_key:
-            return Response("AI selected but no API key provided.", status=400)
+    if use_llm and model not in ALLOWED_MODELS:
+        return Response("Unknown AI model.", status=400)
 
     job_id = uuid.uuid4().hex
     base = Path(tempfile.gettempdir()) / f"workbook_{job_id}"
@@ -153,7 +146,7 @@ def build():
     JOBS[job_id] = {"q": queue.Queue(), "pdf": None, "error": None}
     threading.Thread(
         target=_worker,
-        args=(job_id, in_dir, base / "work", base / "workbook.pdf", use_llm, model, api_key),
+        args=(job_id, in_dir, base / "work", base / "workbook.pdf", use_llm, model),
         daemon=True,
     ).start()
     return {"job": job_id}

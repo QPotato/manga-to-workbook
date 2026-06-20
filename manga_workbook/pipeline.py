@@ -12,7 +12,7 @@ def list_images(input_dir: Path):
 
 
 def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
-        with_llm=False, llm_model=None, api_key=None):
+        with_llm=False, llm_model=None):
     """progress(frac 0..1, msg) is called at each stage boundary and per page.
     When with_llm is set, the free stages are compressed to leave room for the
     (slower) Claude correction + question stage; otherwise the budget is
@@ -72,13 +72,13 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
             for p in workbook["pages"]
         ]
         corrections = llm.correct_pages(
-            pages_arg, model, api_key,
+            pages_arg, model,
             on_progress=lambda d, t: emit(a_end + (f_correct - a_end) * d / t, f"AI: page {d}/{t}"),
         )
         apply_corrections(workbook, corrections)
         emit(f_correct, "AI: writing comprehension questions...")
         lines = [(d["plain"], d.get("en", "")) for p in workbook["pages"] for d in p["dialog"]]
-        workbook["questions"] = llm.comprehension(chapter, lines, model, api_key)
+        workbook["questions"] = llm.comprehension(chapter, lines, model)
         emit(f_quest, "AI stage done.")
 
     (work_dir / "workbook.json").write_text(
@@ -93,7 +93,6 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
 
 if __name__ == "__main__":
     import argparse
-    import os
 
     ap = argparse.ArgumentParser()
     ap.add_argument("input_dir")
@@ -101,8 +100,7 @@ if __name__ == "__main__":
     ap.add_argument("-w", "--work", default="work")
     ap.add_argument("-c", "--chapter")
     ap.add_argument("--with-llm", action="store_true",
-                    help="Refine OCR/translation and add questions via Claude (needs ANTHROPIC_API_KEY)")
-    ap.add_argument("--model", default=None, help="Claude model id (default: Opus)")
+                    help="Refine OCR/translation and add questions via the local `claude` CLI")
+    ap.add_argument("--model", default=None, help="claude model: opus | sonnet | haiku (default sonnet)")
     a = ap.parse_args()
-    run(a.input_dir, a.work, a.out, a.chapter,
-        with_llm=a.with_llm, llm_model=a.model, api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    run(a.input_dir, a.work, a.out, a.chapter, with_llm=a.with_llm, llm_model=a.model)
