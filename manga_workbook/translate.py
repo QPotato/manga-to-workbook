@@ -3,9 +3,16 @@ import html
 import re
 from functools import lru_cache
 
+from .dictionary import gloss as _gloss
+
 MODEL = "Helsinki-NLP/opus-mt-ja-en"
 
 _TAG = re.compile(r"</?[a-zA-Z][^>]*>")
+_JA = re.compile(r"[぀-ヿ㐀-鿿々]")  # hiragana/katakana/kanji/々
+_KATA_ONLY = re.compile(r"^[゠-ヿ゠ー・\s]+$")
+_STAGE = re.compile(r"^[\(\[][^)\]]*[\)\]]$")  # invented "(Laughter)" / "[Music]"
+# opus-mt-ja-en hallucination artifacts: it emits these no matter the input.
+_ARTIFACTS = ("hugo barra", "speaking native language", "speaking in foreign language")
 
 
 def _clean(s: str) -> str:
@@ -18,6 +25,33 @@ def _clean(s: str) -> str:
         prev = s
         s = _TAG.sub("", html.unescape(s))
     return s.strip()
+
+
+def _is_sfx(s: str) -> bool:
+    # Short katakana-only line JMdict doesn't know -> sound effect (ガーッ, ドォン);
+    # opus-mt only hallucinates on these. Real loanwords (ドラゴン) are in JMdict, kept.
+    return len(s) <= 4 and bool(_KATA_ONLY.match(s)) and not _gloss(s)
+
+
+def _translatable(s: str) -> bool:
+    # Needs real Japanese; pure punctuation/digits/latin (……, ！？, ＸＸ) and SFX skip.
+    return bool(_JA.search(s)) and not _is_sfx(s)
+
+
+def _collapse_repeats(s: str) -> str:
+    # opus-mt sometimes loops a phrase; drop immediate duplicate sentences + words.
+    out = []
+    for p in re.split(r"(?<=[.!?])\s+", s):
+        if not out or p.strip().lower() != out[-1].strip().lower():
+            out.append(p)
+    return re.sub(r"\b(\w+)( \1\b){2,}", r"\1", " ".join(out))
+
+
+def _sane(out: str) -> str:
+    # Reject degenerate output: known artifacts and invented stage directions.
+    if any(a in out.lower() for a in _ARTIFACTS) or _STAGE.match(out.strip()):
+        return ""
+    return _collapse_repeats(out).strip()
 
 
 @lru_cache(maxsize=1)
@@ -36,11 +70,11 @@ def translate_lines(lines):
     while still mapping each source line to its own translation.
     """
     lines = [ln.strip() for ln in lines]
-    idx = [i for i, ln in enumerate(lines) if ln]
+    idx = [i for i, ln in enumerate(lines) if _translatable(ln)]
     out = [""] * len(lines)
     if not idx:
         return out
     results = _pipe()([lines[i] for i in idx], max_length=128)
     for i, r in zip(idx, results):
-        out[i] = _clean(r["translation_text"])
+        out[i] = _sane(_clean(r["translation_text"]))
     return out
