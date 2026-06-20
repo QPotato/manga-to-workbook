@@ -1,6 +1,7 @@
 """Offline JA->EN translation via Helsinki-NLP/opus-mt-ja-en (CPU, no API key)."""
 import html
 import re
+from collections import Counter
 from functools import lru_cache
 
 from .dictionary import gloss as _gloss
@@ -39,17 +40,31 @@ def _translatable(s: str) -> bool:
 
 
 def _collapse_repeats(s: str) -> str:
-    # opus-mt sometimes loops a phrase; drop immediate duplicate sentences + words.
+    # opus-mt loops phrases; drop consecutive duplicate chunks (sentence- or
+    # comma-separated) and any single word repeated 3+ times.
     out = []
-    for p in re.split(r"(?<=[.!?])\s+", s):
-        if not out or p.strip().lower() != out[-1].strip().lower():
-            out.append(p)
-    return re.sub(r"\b(\w+)( \1\b){2,}", r"\1", " ".join(out))
+    for p in re.split(r"(?<=[.!?,])\s+", s):
+        key = p.strip().rstrip(",").lower()
+        if key and (not out or key != out[-1][1]):
+            out.append((p, key))
+    return re.sub(r"\b(\w+)( \1\b){2,}", r"\1", " ".join(p for p, _ in out))
+
+
+def _degenerate(s: str) -> bool:
+    # A phrase looped many times ("it's a tree, it's a tree, ...") or output with
+    # very low word variety -> the translation failed; better blank than garbage.
+    chunks = [c.strip().rstrip(",.!?").lower() for c in re.split(r"[.!?,]\s*", s) if c.strip()]
+    if chunks and max(Counter(chunks).values()) >= 5:
+        return True
+    words = s.split()
+    return len(words) >= 12 and len(set(w.lower() for w in words)) / len(words) < 0.45
 
 
 def _sane(out: str) -> str:
-    # Reject degenerate output: known artifacts and invented stage directions.
+    # Reject degenerate output: known artifacts, invented stage directions, loops.
     if any(a in out.lower() for a in _ARTIFACTS) or _STAGE.match(out.strip()):
+        return ""
+    if _degenerate(out):
         return ""
     return _collapse_repeats(out).strip()
 
