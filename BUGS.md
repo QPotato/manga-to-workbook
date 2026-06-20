@@ -1,8 +1,8 @@
 # Workbook quality bugs
 
 Findings from inspecting `workbooks/workbook-{3,4,5}.pdf` (Chainsaw Man, Code
-Geass ×5 vol, SnK + Dungeon Meshi). Ranked by gravity × ease. Checkboxes track
-the fix order.
+Geass ×5 vol, SnK + Dungeon Meshi). Ranked by gravity × ease. **All items below
+are fixed** — see Resolution at the bottom for the per-item commits.
 
 ## Works correctly (do not touch)
 - **Conjugation drills** (辞書形): solid. 殺し→殺す, 倒れ→倒れる, 死ね→死ぬ, できる→出来る.
@@ -32,3 +32,30 @@ the fix order.
 ## Workflow
 - Prefer existing OSS tools over hand-written language logic.
 - For each bug: fix → test (scripts/output in `out/`, gitignored) → commit.
+
+## Resolution (all fixed)
+Order = fix order. Each has a test in `out/test_*.py` (9 suites, all green).
+
+| order | # | fix | commit |
+|-------|---|-----|--------|
+| 1 | 3 | unescape-then-strip loop in `_clean` | `a688ec3` |
+| 2 | 1 | JMdict (jamdict) glosses for vocab, not opus-mt | `59c398e` |
+| 3 | 2 | skip/scrub hallucinated MT (artifacts, SFX, no-JA, repeats) | `cdb282a` |
+| 4 | 4 | no furigana on digit+counter tokens (１日→ついたち) | `b00e8a5` |
+| 5 | 5 | drop 因る/fragments, merge over-split katakana | `5670370` |
+| 6 | 6 | drop banner/spine OCR boxes (extreme aspect) | `c515a12` |
+| 7 | 7 | centroid tier banding for reading order | `9d414a7` |
+| 8 | 8 | fill-in-the-blank uses real words, not verb stems | `6351c3e` |
+| 9 | 9 | cap per-page header word lists | `bf27e75` |
+| 10 | 10 | honest render docstring + remove dead code | `bf62835` |
+
+New dependency: `jamdict` + `jamdict-data` (offline JMdict, ~125 MB).
+
+### Not done (need your call — design, not bugs)
+- **Facing-page duplex print**: the abandoned scheme (manga facing its
+  translation when printed double-sided) was removed as dead code, not built.
+  Can implement if wanted.
+- **CLAUDE.md layout spec**: original-left / cleaned-right / translation-bottom
+  on one page; current splits into two sheets. Deviation, left as-is.
+- **Comprehension questions** section: not implemented (PLAN defers as optional).
+- **Static / GitHub-Pages hosting**: current is Flask + heavy ML, server-only.
