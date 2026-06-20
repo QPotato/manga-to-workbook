@@ -1,9 +1,8 @@
 """Render workbook data -> PDF via WeasyPrint. Self-contained HTML/CSS, embeds images.
 
-Every manga page becomes TWO sheets: the images sheet (original + practice copy)
-and the dialogue sheet (furigana + English). They are laid out so that, printed
-double-sided, the manga lands on odd pages and its translation on the facing even
-page. To guarantee that parity the front matter is padded to an even page count.
+Each manga page produces two consecutive sheets: an images sheet (original panel +
+blank practice copy) and a dialogue sheet (furigana + English). The vocabulary
+summary follows, then the exercises and answer-key appendix.
 """
 import base64
 from pathlib import Path
@@ -40,7 +39,6 @@ h1 { font-size: 22pt; }
                 border-bottom: 1px solid #eee; break-inside: avoid; }
 .dialog .ja { flex: 1 1 50%; }
 .dialog .en { flex: 1 1 50%; color: #555; }
-.filler { }
 .ex h1 { margin-bottom: 12px; }
 .ex .sec { break-inside: avoid; margin-bottom: 14px; }
 .ex .sec h2 { font-size: 14pt; border-bottom: 2px solid #333; padding-bottom: 2px; margin: 0 0 2px; }
@@ -128,7 +126,7 @@ def _page_sections(page, original_dir: Path):
     images = _images(_data_uri(original_dir / page["filename"]),
                      _data_uri(page["cleaned_path"]) if page["cleaned_path"] else "")
     dialog = _dialog(page["dialog"])
-    # Always two sheets: images (odd) then dialogue (even).
+    # Two consecutive sheets per page: images, then its dialogue/translation.
     return (f'<section class="page images-sheet">{header}{images}</section>'
             f'<section class="page dialog-sheet">{header}{dialog}</section>')
 
@@ -157,15 +155,10 @@ def _wrap(inner):
             f"<body>{inner}</body></html>")
 
 
-def _count_pages(inner) -> int:
-    return len(HTML(string=_wrap(inner)).render().pages)
-
-
 def render_pdf(workbook: dict, original_dir, out_pdf):
     original_dir = Path(original_dir)
-    # Manga first so it starts on page 1: each page = images sheet (odd) then
-    # dialogue sheet (even), which lines them up for double-sided printing.
-    # The vocabulary summary is appended at the end (any number of pages).
+    # Manga first (images sheet + dialogue sheet per page), then the vocabulary
+    # summary, then the exercises and answer-key appendix.
     body = [_page_sections(p, original_dir) for p in workbook["pages"]]
     body.append(_summary_section(workbook["summary_vocab"]))
     ex = workbook.get("exercises")
