@@ -14,6 +14,13 @@ def has_digit(s: str) -> bool:
     return bool(_DIGIT.search(s))
 
 
+_KATAKANA = re.compile(r"^[゠-ヿ]+$")  # full katakana block (incl. ー ・)
+
+
+def is_katakana_word(s: str) -> bool:
+    return bool(s) and bool(_KATAKANA.match(s))
+
+
 def is_kanji(ch: str) -> bool:
     return ('一' <= ch <= '鿿') or ch == '々'  # CJK + iteration mark 々
 
