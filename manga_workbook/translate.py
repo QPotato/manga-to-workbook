@@ -9,8 +9,15 @@ _TAG = re.compile(r"</?[a-zA-Z][^>]*>")
 
 
 def _clean(s: str) -> str:
-    # opus-mt sometimes emits stray <i>..</i> markup or HTML entities; drop them.
-    return html.unescape(_TAG.sub("", s)).strip()
+    # opus-mt sometimes emits stray <i>..</i> markup, often entity-encoded
+    # (&lt;i&gt;). Unescape AND strip repeatedly so entity-hidden tags can't
+    # survive: each pass unescapes, then drops any tags that surfaced. Loops
+    # to a fixed point (handles double-encoding too).
+    prev = None
+    while prev != s:
+        prev = s
+        s = _TAG.sub("", html.unescape(s))
+    return s.strip()
 
 
 @lru_cache(maxsize=1)
