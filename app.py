@@ -9,6 +9,7 @@ from pathlib import Path
 from flask import Flask, Response, request, send_file
 from werkzeug.utils import secure_filename
 
+from manga_workbook.llm import ALLOWED_MODELS
 from manga_workbook.pcleaner_runner import IMG_EXT
 from manga_workbook.pipeline import run
 
@@ -31,6 +32,11 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
  #bar{height:14px;background:#e6e6f2;border-radius:7px;overflow:hidden;margin:18px 0 6px;display:none}
  #fill{height:100%;width:0;background:#3355cc;transition:width .3s}
  #msg{font-size:14px;color:#3355cc;min-height:20px}
+ #opts{margin:14px 0;font-size:14px;color:#444}
+ #llmopts{margin:8px 0 0 22px}
+ select{padding:6px;font-size:14px}
+ #key{width:100%;margin-top:6px;padding:8px;font-size:14px;box-sizing:border-box}
+ .hint{font-size:12px;color:#888;margin:4px 0 0}
 </style></head><body>
 <h1>Manga &rarr; Japanese Study Workbook</h1>
 <p>Drop the chapter's images (ordered by filename). You get a printable PDF workbook.</p>
@@ -38,6 +44,20 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
   <div class="drop" id="drop">Click or drop images here
     <input id="file" type="file" name="images" accept="image/*" multiple hidden></div>
   <div id="list"></div>
+  <div id="opts">
+    <label><input type="checkbox" id="llm"> Improve with AI (Claude) &mdash; fixes OCR &amp; translation, adds comprehension questions</label>
+    <div id="llmopts">
+      <label>Model
+        <select id="model">
+          <option value="claude-opus-4-8">Opus 4.8 (best)</option>
+          <option value="claude-sonnet-4-6">Sonnet 4.6 (cheaper)</option>
+          <option value="claude-haiku-4-5">Haiku 4.5 (cheapest)</option>
+        </select>
+      </label>
+      <input id="key" type="password" placeholder="Anthropic API key (sk-ant-...)" autocomplete="off">
+      <p class="hint">Used for this build only &mdash; not stored. Costs scale with page count.</p>
+    </div>
+  </div>
   <button id="go" type="submit" disabled>Build workbook PDF</button>
 </form>
 <div id="bar"><div id="fill"></div></div>
@@ -46,7 +66,11 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 const drop=document.getElementById('drop'),file=document.getElementById('file'),
  list=document.getElementById('list'),go=document.getElementById('go'),
  bar=document.getElementById('bar'),fill=document.getElementById('fill'),
- msg=document.getElementById('msg'),f=document.getElementById('f');
+ msg=document.getElementById('msg'),f=document.getElementById('f'),
+ llm=document.getElementById('llm'),llmopts=document.getElementById('llmopts'),
+ model=document.getElementById('model'),key=document.getElementById('key');
+llmopts.style.display='none';
+llm.onchange=()=>{llmopts.style.display=llm.checked?'block':'none'};
 let files=[];
 function setFiles(fl){files=[...fl].filter(x=>x.type.startsWith('image/'))
   .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
@@ -59,7 +83,9 @@ drop.ondragleave=()=>drop.classList.remove('over');
 drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');setFiles(e.dataTransfer.files)};
 f.onsubmit=async e=>{e.preventDefault();go.disabled=true;bar.style.display='block';
   fill.style.width='0';msg.textContent='Uploading '+files.length+' images...';
+  if(llm.checked&&!key.value.trim()){msg.textContent='Enter an Anthropic API key or uncheck AI.';go.disabled=false;return;}
   const fd=new FormData();files.forEach(x=>fd.append('images',x,x.name));
+  if(llm.checked){fd.append('llm','1');fd.append('model',model.value);fd.append('key',key.value.trim());}
   let job;
   try{const r=await fetch('/build',{method:'POST',body:fd});
     if(!r.ok){msg.textContent='Error: '+(await r.text());go.disabled=false;return;}
@@ -78,14 +104,15 @@ f.onsubmit=async e=>{e.preventDefault();go.disabled=true;bar.style.display='bloc
 </script></body></html>"""
 
 
-def _worker(job_id, in_dir, work_dir, out_pdf):
+def _worker(job_id, in_dir, work_dir, out_pdf, use_llm=False, model=None, api_key=None):
     job = JOBS[job_id]
 
     def progress(frac, m):
         job["q"].put({"frac": frac, "msg": m})
 
     try:
-        run(in_dir, work_dir, out_pdf, progress=progress)
+        run(in_dir, work_dir, out_pdf, progress=progress,
+            with_llm=use_llm, llm_model=model, api_key=api_key)
         job["pdf"] = out_pdf
         job["q"].put({"done": True, "frac": 1.0, "msg": "Done."})
     except Exception as e:
@@ -107,6 +134,15 @@ def build():
     if not uploads:
         return Response("No images uploaded.", status=400)
 
+    use_llm = request.form.get("llm") == "1"
+    model = request.form.get("model") or None
+    api_key = request.form.get("key") or None
+    if use_llm:
+        if model not in ALLOWED_MODELS:
+            return Response("Unknown AI model.", status=400)
+        if not api_key:
+            return Response("AI selected but no API key provided.", status=400)
+
     job_id = uuid.uuid4().hex
     base = Path(tempfile.gettempdir()) / f"workbook_{job_id}"
     in_dir = base / "input"
@@ -116,7 +152,9 @@ def build():
 
     JOBS[job_id] = {"q": queue.Queue(), "pdf": None, "error": None}
     threading.Thread(
-        target=_worker, args=(job_id, in_dir, base / "work", base / "workbook.pdf"), daemon=True
+        target=_worker,
+        args=(job_id, in_dir, base / "work", base / "workbook.pdf", use_llm, model, api_key),
+        daemon=True,
     ).start()
     return {"job": job_id}
 
