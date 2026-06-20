@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from .workbook import build_workbook
+from .workbook import apply_corrections, build_workbook
 from .pcleaner_runner import clean_dir, list_image_names, ocr_dir
 from .render import render_pdf
 
@@ -11,9 +11,12 @@ def list_images(input_dir: Path):
     return list_image_names(input_dir)
 
 
-def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None):
-    """progress(frac: float 0..1, msg: str) is called at each stage boundary
-    and per page during analysis. Stage budget: OCR 40%, clean 35%, analyze 17%, render 8%."""
+def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
+        with_llm=False, llm_model=None, api_key=None):
+    """progress(frac 0..1, msg) is called at each stage boundary and per page.
+    When with_llm is set, the free stages are compressed to leave room for the
+    (slower) Claude correction + question stage; otherwise the budget is
+    OCR 40% / clean 35% / analyze 17% / render 8%."""
     state = {"frac": 0.0}
 
     def emit(frac, msg):
@@ -29,26 +32,55 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None):
     work_dir.mkdir(parents=True, exist_ok=True)
     chapter = chapter or input_dir.name
 
+    # Stage-end fractions: the LLM stage gets the back half when enabled.
+    if with_llm:
+        f_ocr, f_clean, f_analyze, f_correct, f_quest = 0.18, 0.33, 0.40, 0.85, 0.90
+    else:
+        f_ocr = f_clean = f_analyze = f_correct = f_quest = 0.0  # set below
+
     ordered = list_images(input_dir)
     n = len(ordered)
+    o_end, c_end, a_end = (f_ocr, f_clean, f_analyze) if with_llm else (0.42, 0.77, 0.94)
+
     emit(0.02, f"Reading text from {n} pages (OCR)...")
     ocr_pages = ocr_dir(
         input_dir, work_dir / "ocr.csv",
-        on_progress=lambda d, t: emit(0.02 + 0.40 * d / t, f"OCR: page {d}/{t}"),
+        on_progress=lambda d, t: emit(0.02 + (o_end - 0.02) * d / t, f"OCR: page {d}/{t}"),
     )
 
-    emit(0.42, "Erasing speech bubbles (cleaning panels)...")
+    emit(o_end, "Erasing speech bubbles (cleaning panels)...")
     cleaned_map = clean_dir(
         input_dir, work_dir / "cleaned",
-        on_progress=lambda d, t: emit(0.42 + 0.35 * d / t, f"Cleaning: page {d}/{t}"),
+        on_progress=lambda d, t: emit(o_end + (c_end - o_end) * d / t, f"Cleaning: page {d}/{t}"),
     )
 
-    emit(0.77, "Adding furigana, extracting words, translating...")
+    emit(c_end, "Adding furigana, extracting words, translating...")
 
     def on_page(i, total):
-        emit(0.77 + 0.17 * (i / total), f"Analyzing page {i}/{total}...")
+        emit(c_end + (a_end - c_end) * (i / total), f"Analyzing page {i}/{total}...")
 
     workbook = build_workbook(ordered, ocr_pages, cleaned_map, chapter=chapter, on_page=on_page)
+
+    if with_llm:
+        from . import llm
+
+        model = llm_model or llm.DEFAULT_MODEL
+        emit(a_end, f"AI ({model}): correcting OCR and translations...")
+        pages_arg = [
+            (p["filename"], str(input_dir / p["filename"]),
+             [{"id": i, "text": d["plain"]} for i, d in enumerate(p["dialog"], 1)])
+            for p in workbook["pages"]
+        ]
+        corrections = llm.correct_pages(
+            pages_arg, model, api_key,
+            on_progress=lambda d, t: emit(a_end + (f_correct - a_end) * d / t, f"AI: page {d}/{t}"),
+        )
+        apply_corrections(workbook, corrections)
+        emit(f_correct, "AI: writing comprehension questions...")
+        lines = [(d["plain"], d.get("en", "")) for p in workbook["pages"] for d in p["dialog"]]
+        workbook["questions"] = llm.comprehension(chapter, lines, model, api_key)
+        emit(f_quest, "AI stage done.")
+
     (work_dir / "workbook.json").write_text(
         json.dumps(workbook, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -61,11 +93,16 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None):
 
 if __name__ == "__main__":
     import argparse
+    import os
 
     ap = argparse.ArgumentParser()
     ap.add_argument("input_dir")
     ap.add_argument("-o", "--out", default="workbook.pdf")
     ap.add_argument("-w", "--work", default="work")
     ap.add_argument("-c", "--chapter")
+    ap.add_argument("--with-llm", action="store_true",
+                    help="Refine OCR/translation and add questions via Claude (needs ANTHROPIC_API_KEY)")
+    ap.add_argument("--model", default=None, help="Claude model id (default: Opus)")
     a = ap.parse_args()
-    run(a.input_dir, a.work, a.out, a.chapter)
+    run(a.input_dir, a.work, a.out, a.chapter,
+        with_llm=a.with_llm, llm_model=a.model, api_key=os.environ.get("ANTHROPIC_API_KEY"))
