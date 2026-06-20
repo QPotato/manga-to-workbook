@@ -29,7 +29,9 @@ def list_image_names(input_dir: Path):
 
 
 def _sorted_paths(input_dir: Path):
-    return [str(input_dir / n) for n in list_image_names(input_dir)]
+    # Absolute paths: pcleaner silently writes nothing when given a relative
+    # --output_dir, and resolving inputs too keeps everything unambiguous.
+    return [str((input_dir / n).resolve()) for n in list_image_names(input_dir)]
 
 
 def _run(args, cache_dir: Path, n_images=None, on_progress=None):
@@ -81,6 +83,7 @@ def _run(args, cache_dir: Path, n_images=None, on_progress=None):
 def ocr_dir(input_dir: Path, csv_path: Path, on_progress=None) -> dict:
     """Run `pcleaner ocr`. Returns {filename: [box,...]} in reading order.
     Each box: {x1,y1,x2,y2,text}. on_progress(done, total) fires per image."""
+    csv_path = Path(csv_path).resolve()  # pcleaner needs an absolute output path
     imgs = _sorted_paths(input_dir)
     csv_path.unlink(missing_ok=True)  # pcleaner prompts (and EOFErrors) if it exists
     _run(["ocr", *imgs, "--csv", "--output-path", str(csv_path)],
@@ -160,6 +163,7 @@ def _reading_order(boxes):
 
 def clean_dir(input_dir: Path, out_dir: Path, on_progress=None) -> dict:
     """Run `pcleaner clean`. Returns {original_filename: cleaned_image_path}."""
+    out_dir = Path(out_dir).resolve()  # pcleaner writes nothing for a relative dir
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in out_dir.rglob("*_clean.*"):  # avoid pcleaner's overwrite prompt
         old.unlink()
@@ -175,4 +179,6 @@ def clean_dir(input_dir: Path, out_dir: Path, on_progress=None) -> dict:
             match = next((v for k, v in cleaned.items() if k.startswith(stem + "_clean")), None)
         if match:
             mapping[Path(img).name] = match
+    if imgs and not mapping:  # clean ran but produced nothing -> fail loudly, not blank panels
+        raise RuntimeError(f"pcleaner clean wrote no cleaned images to {out_dir}")
     return mapping
