@@ -14,9 +14,9 @@
   else root.StrokeMatch = factory();
 })(typeof self !== "undefined" ? self : this, function () {
   const N = 16;            // resample resolution per stroke
-  const DIR_MIN = 0.25;    // min cos(angle) between user/ref direction (~<75 deg off)
-  const END_MAX = 0.40;    // max endpoint offset (fraction of cell)
-  const MEAN_MAX = 0.45;   // max mean point distance (loose shape check)
+  const DIR_MIN = 0.40;    // min cos(angle) between user/ref direction (~<66 deg off)
+  const END_MAX = 0.33;    // max endpoint offset (fraction of cell)
+  const MEAN_MAX = 0.40;   // max mean point distance (loose shape check)
 
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 

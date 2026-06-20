@@ -62,7 +62,8 @@ def build_practice_html(workbook, original_dir, out_html, cache_dir, on_progress
         for d in p["dialog"]:
             chars = [{"c": ch, "s": strokes_by_char.get(ch, []) if _is_target(ch) else []}
                      for ch in d["plain"]]
-            lines.append({"p": pi, "fur": d["furigana"], "en": d.get("en", ""), "chars": chars})
+            if any(c["s"] for c in chars):  # skip lines with nothing to write (e.g. "．．．")
+                lines.append({"p": pi, "fur": d["furigana"], "en": d.get("en", ""), "chars": chars})
 
     data = {"chapter": workbook.get("chapter", ""), "pages": page_imgs, "lines": lines,
             "viewbox": kanjivg.VIEWBOX}
@@ -186,10 +187,13 @@ function makeCell(ch){
 }
 
 function animate(guide){
-  guide._paths.forEach((p,i)=>{ const L=p.getTotalLength(); p.style.transition="none"; p.style.stroke="#3355cc";
-    p.style.strokeDasharray=L; p.style.strokeDashoffset=L;
-    setTimeout(()=>{ p.style.transition="stroke-dashoffset .5s linear"; p.style.strokeDashoffset=0; }, 150+i*550); });
-  setTimeout(()=>guide._paths.forEach(p=>{ p.style.stroke=""; p.style.strokeDasharray=""; p.style.strokeDashoffset=""; }), 150+guide._paths.length*550+700);
+  (guide._timers || []).forEach(clearTimeout); guide._timers = [];   // restart cleanly on repeat clicks
+  const reset = () => guide._paths.forEach(p=>{ p.style.transition=""; p.style.stroke=""; p.style.strokeDasharray=""; p.style.strokeDashoffset=""; });
+  reset();
+  guide._paths.forEach((p,i)=>{ const L=p.getTotalLength();
+    p.style.transition="none"; p.style.stroke="#3355cc"; p.style.strokeDasharray=L; p.style.strokeDashoffset=L;
+    guide._timers.push(setTimeout(()=>{ p.style.transition="stroke-dashoffset .5s linear"; p.style.strokeDashoffset=0; }, 150+i*550)); });
+  guide._timers.push(setTimeout(reset, 150 + guide._paths.length*550 + 700));
 }
 
 let cells = [];
