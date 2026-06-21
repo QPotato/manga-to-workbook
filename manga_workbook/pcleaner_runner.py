@@ -8,6 +8,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from .panels import detect_panels, group_by_panel
+
 VENV_BIN = Path(sys.executable).parent
 PCLEANER = str(VENV_BIN / "pcleaner")
 
@@ -117,7 +119,13 @@ def ocr_dir(input_dir: Path, csv_path: Path, on_progress=None, reuse=False) -> d
     for fname, boxes in pages.items():
         pw, ph = _page_size(input_dir / fname)
         kept = [b for b in boxes if not _is_banner_box(b, pw, ph)]
-        result[fname] = _reading_order(kept)
+        # Panel-aware order: split the page into panels (manga reading order) and
+        # sort boxes within each. Falls back to a flat sort when no panels found.
+        panels = detect_panels(input_dir / fname)
+        ordered = []
+        for grp in group_by_panel(kept, panels):
+            ordered += _reading_order(grp)
+        result[fname] = ordered
     return result
 
 

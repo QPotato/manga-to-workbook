@@ -13,29 +13,32 @@ CSS = """
 @page { size: A4 landscape; margin: 10mm; }
 * { box-sizing: border-box; }
 body { font-family: "Noto Sans CJK JP", "Noto Serif CJK JP", "Yu Gothic",
-       "Meiryo", "MS Gothic", sans-serif; color: #111; }
+       "Meiryo", "MS Gothic", sans-serif; color: #111; margin: 0; }
 ruby rt { font-size: 0.55em; }
 h1 { font-size: 22pt; }
-.summary h1 { margin-bottom: 10px; }
-.summary h2 { border-bottom: 2px solid #333; padding-bottom: 2px; margin: 0 0 6px; font-size: 14pt; }
-.summary .cols { display: flex; gap: 16px; align-items: flex-start; }
-.summary .group { flex: 1 1 0; min-width: 0; }
-.group.nouns { flex: 1.4 1 0; }
-.wordlist { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { background: #eef; border: 1px solid #ccd; border-radius: 5px; position: relative;
-        padding: 3px 7px; display: inline-flex; flex-direction: column; align-items: flex-start; }
-.chip .w { font-size: 11pt; }
-.chip .g { font-size: 8pt; color: #667; margin-top: 1px; }
-.chip .lvl { position: absolute; top: -7px; right: -5px; font-size: 6.5pt; background: #fde;
-             color: #a44; border: 1px solid #e9b; border-radius: 3px; padding: 0 2px; }
+.summary h1 { margin-bottom: 12px; }
+/* Vocabulary list: block entries flowed in CSS multi-columns. Avoids the flex/
+   inline-flex chip layout that WeasyPrint renders as blank. */
+.vocab-group { margin-bottom: 14px; }
+.vocab-group h2 { border-bottom: 2px solid #333; padding-bottom: 2px; margin: 0 0 7px; font-size: 14pt; }
+.vocab-group h2 .sub { font-size: 10pt; color: #888; font-weight: normal; }
+.vocab-cols { column-count: 4; column-gap: 18px; }
+.v { break-inside: avoid; margin: 0 0 7px; }
+.v .jp { font-size: 12pt; }
+.v .en { display: block; font-size: 8.5pt; color: #667; }
+.v .lvl { font-size: 7pt; border: 1px solid; border-radius: 3px; padding: 0 3px; margin-left: 5px;
+          vertical-align: 1px; background: #ffe1e1; color: #c0271f; border-color: #f0a3a0; }
+/* JLPT level colours: N5 blue, N4 green, N3 yellow, N2 orange, N1 / outside-JLPT red */
+.v .lvl.n5 { background: #e1ecff; color: #1d4ed8; border-color: #9db8f0; }
+.v .lvl.n4 { background: #e3f6e3; color: #1f8a3b; border-color: #9ad6a3; }
+.v .lvl.n3 { background: #fff6cc; color: #8a7000; border-color: #e6cf6b; }
+.v .lvl.n2 { background: #ffe9d1; color: #c2620e; border-color: #f0bd86; }
+.v .lvl.n1 { background: #ffe1e1; color: #c0271f; border-color: #f0a3a0; }
 .page { page-break-after: always; }
 .page:last-child { page-break-after: auto; }
-.header { border: 1px solid #999; padding: 6px 8px; margin-bottom: 6px; font-size: 10pt; }
-.header .row { margin: 2px 0; }
-.header .label { font-weight: bold; display: inline-block; min-width: 48px; }
 .images { display: flex; gap: 8px; }
 .images .col { flex: 1 1 50%; text-align: center; }
-.images img { max-width: 100%; max-height: 150mm; object-fit: contain; border: 1px solid #ddd; }
+.images img { max-width: 100%; max-height: 188mm; object-fit: contain; border: 1px solid #ddd; }
 .dialog { font-size: 12pt; }
 .dialog .line { display: flex; gap: 12px; margin: 4px 0; padding-bottom: 4px;
                 border-bottom: 1px solid #eee; break-inside: avoid; }
@@ -75,25 +78,29 @@ def _data_uri(path: Path) -> str:
 
 def _wordlist(words):
     if not words:
-        return '<span style="color:#aaa">—</span>'
+        return '<div class="v" style="color:#aaa">—</div>'
     out = []
     for w in words:
-        gloss = f'<span class="g">{_esc(w["en"])}</span>' if w.get("en") else ""
-        lvl = f'<span class="lvl">{_esc(w["jlpt"])}</span>' if w.get("jlpt") else ""
-        out.append(f'<span class="chip">{lvl}<span class="w">{w["furigana"]}</span>{gloss}</span>')
+        gloss = f'<span class="en">{_esc(w["en"])}</span>' if w.get("en") else ""
+        lvl = (f'<span class="lvl {_esc(w["jlpt"].lower())}">{_esc(w["jlpt"])}</span>'
+               if w.get("jlpt") else "")
+        out.append(f'<div class="v"><span class="jp">{w["furigana"]}</span>{lvl}{gloss}</div>')
     return "".join(out)
 
 
+def _vocab_group(jp, en, words):
+    return (f'<div class="vocab-group"><h2>{jp} <span class="sub">{en}</span></h2>'
+            f'<div class="vocab-cols">{_wordlist(words)}</div></div>')
+
+
 def _summary_section(vocab):
-    return f"""
-    <section class="summary page">
-      <h1>Vocabulary Summary</h1>
-      <div class="cols">
-        <div class="group verbs"><h2>動詞</h2><div class="wordlist">{_wordlist(vocab['verbs'])}</div></div>
-        <div class="group nouns"><h2>名詞</h2><div class="wordlist">{_wordlist(vocab['nouns'])}</div></div>
-        <div class="group adjs"><h2>形容詞</h2><div class="wordlist">{_wordlist(vocab['adjectives'])}</div></div>
-      </div>
-    </section>"""
+    return (
+        '<section class="summary page">'
+        '<h1>Vocabulary Summary 語彙</h1>'
+        f'{_vocab_group("動詞", "Verbs", vocab["verbs"])}'
+        f'{_vocab_group("名詞", "Nouns", vocab["nouns"])}'
+        f'{_vocab_group("形容詞", "Adjectives", vocab["adjectives"])}'
+        '</section>')
 
 
 def _grammar_section(items):
@@ -103,15 +110,6 @@ def _grammar_section(items):
         f'<div style="color:#444;margin-top:2px">{_esc(g["example"])}</div></li>'
         for g in items)
     return f'<section class="ex page"><h1>Grammar 文法</h1><ol>{rows}</ol></section>'
-
-
-def _header(h):
-    return f"""
-      <div class="header">
-        <div class="row"><span class="label">動詞</span>{" / ".join(h['verbs']) or "—"}</div>
-        <div class="row"><span class="label">名詞</span>{" / ".join(h['nouns']) or "—"}</div>
-        <div class="row"><span class="label">形容詞</span>{" / ".join(h['adjectives']) or "—"}</div>
-      </div>"""
 
 
 def _images(orig, cleaned):
@@ -136,13 +134,12 @@ def _dialog(dialog):
 
 
 def _page_sections(page, original_dir: Path):
-    header = _header(page["header"])
     images = _images(_data_uri(original_dir / page["filename"]),
                      _data_uri(page["cleaned_path"]) if page["cleaned_path"] else "")
     dialog = _dialog(page["dialog"])
     # Two consecutive sheets per page: images, then its dialogue/translation.
-    return (f'<section class="page images-sheet">{header}{images}</section>'
-            f'<section class="page dialog-sheet">{header}{dialog}</section>')
+    return (f'<section class="page images-sheet">{images}</section>'
+            f'<section class="page dialog-sheet">{dialog}</section>')
 
 
 def _exercise_section(ex):
