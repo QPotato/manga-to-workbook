@@ -23,12 +23,12 @@ questions on top.
 
 The PDF workbook contains, in order:
 
-- **Vocabulary summary** — the chapter's most frequent verbs, nouns, and
-  adjectives with furigana, English glosses (JMdict), and approximate JLPT levels.
 - **Per page**, two facing sheets:
   - the original panel beside a **text-cleaned "write here" copy** (bubbles erased),
     plus a per-page word list;
   - the **dialogue with furigana** and English, in panel reading order.
+- **Vocabulary summary** — the chapter's most frequent verbs, nouns, and
+  adjectives with furigana, English glosses (JMdict), and approximate JLPT levels.
 - **Exercises** — furigana cloze, vocabulary recall, conjugation → dictionary
   form, fill-in-the-blank, particle drills, and panel sequencing — all generated
   deterministically from the chapter, with an **answer key** appendix.
