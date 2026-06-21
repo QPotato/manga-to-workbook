@@ -129,6 +129,16 @@ All build on the existing `workbook.json` (furigana, JMdict glosses, tokens,
 exercises, + optional `claude -p` corrections/translations/questions). Ordered
 by build dependency, with the primary goal (kanji writing) called out.
 
+### Status
+- ✅ **Reader** (#0): `reader.py` — furigana toggle, EN reveal, vocab+JLPT, optional audio.
+- ✅ **Kanji writing practice** (#1, prototype): `practice.py` + `web/stroke_match.js` —
+  KanjiVG stroke-order check (lenient), read→write→advance, mouse now / pen later.
+- ✅ **Anki export** (#2): `anki.py`.
+- ✅ **JLPT tagging** (#3): `jlpt.py` (chips + Anki tags).
+- ✅ **TTS audio** (#4): edge-tts in the reader (online).
+- ⬜ #5 genkō sheets (writing cells cover most of it), #6 LLM extension
+  (counter readings + grammar notes), #7 caching + panel-aware order.
+
 ### 0. Interactive HTML reader (foundation — build first)
 Flask already serves; add a browser view of `workbook.json` (not just the PDF).
 - Furigana **toggle** (hide readings → self-test → reveal), hover-for-gloss,
