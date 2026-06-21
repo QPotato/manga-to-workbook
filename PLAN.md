@@ -136,8 +136,11 @@ by build dependency, with the primary goal (kanji writing) called out.
 - ✅ **Anki export** (#2): `anki.py`.
 - ✅ **JLPT tagging** (#3): `jlpt.py` (chips + Anki tags).
 - ✅ **TTS audio** (#4): edge-tts in the reader (online).
-- ⬜ #5 genkō sheets (writing cells cover most of it), #6 LLM extension
-  (counter readings + grammar notes), #7 caching + panel-aware order.
+- ✅ **LLM grammar notes** (#6): `llm.grammar()` -> PDF + reader "文法" section.
+- ✅ **OCR/clean cache reuse** (#7, caching half): `--reuse` skips pcleaner.
+- ⬜ #5 genko sheets — covered by the writing-practice cells.
+- ⬜ #7 panel-aware reading order — needs panel detection (research-grade); the
+  row-band heuristic handles standard pages. Deferred.
 
 ### 0. Interactive HTML reader (foundation — build first)
 Flask already serves; add a browser view of `workbook.json` (not just the PDF).
