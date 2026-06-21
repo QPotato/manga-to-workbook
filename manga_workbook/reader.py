@@ -91,7 +91,7 @@ def build_reader_html(workbook, original_dir, out_html, audio=False,
                    for e in sv.get(cat, [])] for cat in ("verbs", "nouns", "adjectives")}
 
     data = {"chapter": workbook.get("chapter", ""), "pages": pages, "vocab": vocab,
-            "audioDir": audio_rel}
+            "grammar": workbook.get("grammar", []), "audioDir": audio_rel}
     html = _TMPL.replace("/*__DATA__*/", "DATA=" + json.dumps(data, ensure_ascii=False))
     out_html.write_text(html, encoding="utf-8")
     return out_html
@@ -130,6 +130,7 @@ _TMPL = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  .chip{position:relative;background:#eef;border:1px solid #ccd;border-radius:5px;padding:3px 8px;display:inline-flex;flex-direction:column;align-items:flex-start}
  .chip .w{font-size:15px} .chip .g{font-size:11px;color:#667} .chip .lvl{position:absolute;top:-7px;right:-5px;font-size:9px;background:#fde;color:#a44;border:1px solid #e9b;border-radius:3px;padding:0 2px}
  .chip button{margin-top:3px;font-size:11px;border:1px solid #ccd;background:#fff;border-radius:4px;cursor:pointer}
+ .gitem{padding:6px 0;border-bottom:1px solid #eee;font-size:15px} .gitem b{font-size:18px}
 </style></head><body>
 <div id="bar">
   <strong id="title"></strong>
@@ -137,7 +138,7 @@ _TMPL = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
   <span style="color:#999;font-size:12.5px">Tap ▶ to listen, EN to reveal meaning.</span>
 </div>
 <div class="wrap"><div id="content"></div>
-  <h2 id="vtitle">Vocabulary</h2>
+  <div id="grammar"></div>
   <div id="verbs"></div><div id="nouns"></div><div id="adjs"></div>
 </div>
 <script>
@@ -171,6 +172,14 @@ function render(){
     if(p.img){ const im=document.createElement("img"); im.src=p.img; pg.appendChild(im); }
     p.lines.forEach(l=>pg.appendChild(lineEl(l)));
     content.appendChild(pg);
+  });
+  const g = document.getElementById("grammar");
+  (DATA.grammar || []).forEach((it,i)=>{
+    if(i===0){ const h=document.createElement("h2"); h.textContent="文法 grammar"; g.appendChild(h); }
+    const d=document.createElement("div"); d.className="gitem";
+    d.innerHTML = `<b>${esc(it.point)}</b> <span style="color:#667">${esc(it.explain)}</span>`
+                  + `<div style="color:#445;margin-top:2px">${esc(it.example)}</div>`;
+    g.appendChild(d);
   });
   const cats = {verbs:"動詞 verbs", nouns:"名詞 nouns", adjs:"形容詞 adjectives"};
   const key = {verbs:"verbs", nouns:"nouns", adjs:"adjectives"};

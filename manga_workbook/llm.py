@@ -110,3 +110,25 @@ def comprehension(chapter, lines, model=DEFAULT_MODEL, n=8):
                           model, allow_read=False))
     return [{"q": str(q.get("question", "")), "a": str(q.get("answer", ""))}
             for q in data.get("items", [])]
+
+
+_GRAMMAR = (
+    "You are a Japanese teacher. From the chapter's dialogue, pick the {n} most "
+    "useful grammar points for a learner (particles, verb/adjective forms, set "
+    "patterns). For each give: the point (e.g. 〜ている), a one-line English "
+    "explanation, and one example sentence taken from the dialogue.\n"
+    'Output ONLY JSON, no prose, no markdown fences: '
+    '{{"items":[{{"point":"...","explain":"...","example":"..."}}]}}\n\n'
+    "Chapter: {chapter}\nDialogue:\n{body}"
+)
+
+
+def grammar(chapter, lines, model=DEFAULT_MODEL, n=6):
+    """lines: list of (ja, en). Returns [{"point","explain","example"}, ...]."""
+    if not lines:
+        return []
+    body = "\n".join(f"- {ja}" for ja, _ in lines)
+    data = _json_obj(_run(_GRAMMAR.format(n=n, chapter=chapter, body=body),
+                          model, allow_read=False))
+    return [{"point": str(q.get("point", "")), "explain": str(q.get("explain", "")),
+             "example": str(q.get("example", ""))} for q in data.get("items", [])]

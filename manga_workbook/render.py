@@ -96,6 +96,15 @@ def _summary_section(vocab):
     </section>"""
 
 
+def _grammar_section(items):
+    rows = "".join(
+        f'<li class="item"><span class="big">{_esc(g["point"])}</span> '
+        f'<span style="color:#666">{_esc(g["explain"])}</span>'
+        f'<div style="color:#444;margin-top:2px">{_esc(g["example"])}</div></li>'
+        for g in items)
+    return f'<section class="ex page"><h1>Grammar 文法</h1><ol>{rows}</ol></section>'
+
+
 def _header(h):
     return f"""
       <div class="header">
@@ -187,6 +196,8 @@ def render_pdf(workbook: dict, original_dir, out_pdf):
     # summary, then the exercises and answer-key appendix.
     body = [_page_sections(p, original_dir) for p in workbook["pages"]]
     body.append(_summary_section(workbook["summary_vocab"]))
+    if workbook.get("grammar"):
+        body.append(_grammar_section(workbook["grammar"]))
     ex = workbook.get("exercises")
     questions = workbook.get("questions")
     # Worksheets first (exercises, then comprehension), answer keys last.

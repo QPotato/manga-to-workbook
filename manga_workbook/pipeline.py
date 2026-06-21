@@ -79,6 +79,7 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
         emit(f_correct, "AI: writing comprehension questions...")
         lines = [(d["plain"], d.get("en", "")) for p in workbook["pages"] for d in p["dialog"]]
         workbook["questions"] = llm.comprehension(chapter, lines, model)
+        workbook["grammar"] = llm.grammar(chapter, lines, model)
         emit(f_quest, "AI stage done.")
 
     (work_dir / "workbook.json").write_text(
