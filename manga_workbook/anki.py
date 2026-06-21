@@ -51,9 +51,12 @@ def build_anki(workbook, out_apkg, include_sentences=True) -> int:
         for v in items:
             if not v.get("en"):
                 continue
+            tags = [ctag, "pos::" + cat]
+            if v.get("jlpt"):
+                tags.append("jlpt::" + v["jlpt"])
             deck.add_note(genanki.Note(
                 model=_VOCAB_MODEL, fields=[v["word"], v["furigana"], v["en"]],
-                tags=[ctag, "pos::" + cat], guid=genanki.guid_for(chapter, "v", v["word"])))
+                tags=tags, guid=genanki.guid_for(chapter, "v", v["word"])))
             notes += 1
 
     if include_sentences:

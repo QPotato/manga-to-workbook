@@ -22,10 +22,12 @@ h1 { font-size: 22pt; }
 .summary .group { flex: 1 1 0; min-width: 0; }
 .group.nouns { flex: 1.4 1 0; }
 .wordlist { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { background: #eef; border: 1px solid #ccd; border-radius: 5px;
+.chip { background: #eef; border: 1px solid #ccd; border-radius: 5px; position: relative;
         padding: 3px 7px; display: inline-flex; flex-direction: column; align-items: flex-start; }
 .chip .w { font-size: 11pt; }
 .chip .g { font-size: 8pt; color: #667; margin-top: 1px; }
+.chip .lvl { position: absolute; top: -7px; right: -5px; font-size: 6.5pt; background: #fde;
+             color: #a44; border: 1px solid #e9b; border-radius: 3px; padding: 0 2px; }
 .page { page-break-after: always; }
 .page:last-child { page-break-after: auto; }
 .header { border: 1px solid #999; padding: 6px 8px; margin-bottom: 6px; font-size: 10pt; }
@@ -77,7 +79,8 @@ def _wordlist(words):
     out = []
     for w in words:
         gloss = f'<span class="g">{_esc(w["en"])}</span>' if w.get("en") else ""
-        out.append(f'<span class="chip"><span class="w">{w["furigana"]}</span>{gloss}</span>')
+        lvl = f'<span class="lvl">{_esc(w["jlpt"])}</span>' if w.get("jlpt") else ""
+        out.append(f'<span class="chip">{lvl}<span class="w">{w["furigana"]}</span>{gloss}</span>')
     return "".join(out)
 
 

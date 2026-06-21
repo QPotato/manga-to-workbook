@@ -3,6 +3,7 @@ from collections import Counter
 
 from .dictionary import gloss as dict_gloss
 from .exercises import build_exercises
+from .jlpt import label as jlpt_label
 from .language import extract_words, furigana_html, tokens as tokenize
 
 
@@ -59,7 +60,8 @@ def _enrich(words, category):
     # Dictionary glosses (offline JMdict), not opus-mt: single words need a
     # dictionary, not a sentence translator. Always on; needs no torch.
     return [
-        {"word": w, "furigana": furigana_html(w), "en": dict_gloss(w, category)}
+        {"word": w, "furigana": furigana_html(w), "en": dict_gloss(w, category),
+         "jlpt": jlpt_label(w)}
         for w in words
     ]
 
