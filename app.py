@@ -44,16 +44,20 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
     <input id="file" type="file" name="images" accept="image/*" multiple hidden></div>
   <div id="list"></div>
   <div id="opts">
-    <label><input type="checkbox" id="llm"> Improve with AI (Claude) &mdash; fixes OCR &amp; translation, adds comprehension questions</label>
+    <label><input type="checkbox" id="llm"> Improve with AI &mdash; natural translations, plus Japanese comprehension questions &amp; grammar notes</label>
     <div id="llmopts">
       <label>Model
         <select id="model">
-          <option value="sonnet">Sonnet (cheaper)</option>
-          <option value="opus">Opus (best)</option>
-          <option value="haiku">Haiku (cheapest)</option>
+          <option value="deepseek-chat">DeepSeek Chat (default)</option>
+          <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+          <option value="sonnet">Claude Sonnet (also fixes OCR)</option>
+          <option value="opus">Claude Opus (also fixes OCR)</option>
+          <option value="haiku">Claude Haiku (also fixes OCR)</option>
         </select>
       </label>
-      <p class="hint">Uses your local Claude Code login (the <code>claude</code> CLI). Runs locally; cost is billed to that account.</p>
+      <p class="hint">DeepSeek (API key) improves translations and adds Japanese Q&amp;A + grammar.
+      Claude models use your local <code>claude</code> CLI login and can additionally correct the
+      Japanese OCR from the page image. Cost is billed to whichever account you pick.</p>
     </div>
   </div>
   <button id="go" type="submit" disabled>Build workbook PDF</button>

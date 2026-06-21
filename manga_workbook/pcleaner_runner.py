@@ -38,10 +38,21 @@ def _run(args, cache_dir: Path, n_images=None, on_progress=None):
     # Isolate pcleaner's working cache per job so concurrent runs don't clobber
     # each other's temp files (XDG_CACHE_HOME controls where pcleaner writes).
     cache_dir.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "XDG_CACHE_HOME": str(cache_dir)}
+    # Force UTF-8 I/O: pcleaner prints OCR'd Japanese to stdout, which crashes on
+    # Windows' default cp1252 codec (UnicodeEncodeError). We also decode its output
+    # as UTF-8 below to match.
+    env = {
+        **os.environ,
+        "XDG_CACHE_HOME": str(cache_dir),
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+    }
 
     if not (n_images and on_progress):
-        proc = subprocess.run([PCLEANER, *args], capture_output=True, text=True, env=env)
+        proc = subprocess.run(
+            [PCLEANER, *args], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", env=env,
+        )
         if proc.returncode != 0:
             raise RuntimeError(f"pcleaner {args[0]} failed:\n{proc.stderr[-2000:]}")
         return proc
@@ -51,7 +62,7 @@ def _run(args, cache_dir: Path, n_images=None, on_progress=None):
     # total equals the number of input images tracks page-by-page progress.
     proc = subprocess.Popen(
         [PCLEANER, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, env=env, bufsize=1,
+        text=True, encoding="utf-8", errors="replace", env=env, bufsize=1,
     )
     tail, buf, last = [], "", -1
     while True:

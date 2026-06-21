@@ -101,8 +101,10 @@ if __name__ == "__main__":
     ap.add_argument("-w", "--work", default="work")
     ap.add_argument("-c", "--chapter")
     ap.add_argument("--with-llm", action="store_true",
-                    help="Refine OCR/translation and add questions via the local `claude` CLI")
-    ap.add_argument("--model", default=None, help="claude model: opus | sonnet | haiku (default sonnet)")
+                    help="Refine translations and add Japanese comprehension questions + grammar")
+    ap.add_argument("--model", default=None,
+                    help="LLM model: deepseek-chat | deepseek-reasoner (DeepSeek API, default) "
+                         "| opus | sonnet | haiku (local claude CLI, also fixes OCR)")
     ap.add_argument("--reuse", action="store_true",
                     help="reuse cached OCR/cleaned in the work dir (same inputs) instead of re-running")
     a = ap.parse_args()

@@ -1,31 +1,85 @@
-"""Optional LLM enhancement via the local Claude Code CLI (`claude -p`).
+"""Optional LLM enhancement. Two providers:
 
-Runs on the user's local Claude Code login — no API key, local use only. Isolated
-and opt-in: the free pipeline (pcleaner + manga-ocr + opus-mt + fugashi + jamdict)
-does the heavy lifting; this refines it when the checkbox is on. Per CLAUDE.md,
-free tools first.
+  * DeepSeek API (default) — text-only (no vision). Uses the key in env
+    DEEPSEEK_API_KEY or a `DEEPSEEK_API_KEY` file in the project root. It refines
+    the rough opus-mt English into natural translations and writes comprehension
+    questions + grammar notes. It does NOT change the OCR'd Japanese (it can't see
+    the page).
+  * Claude Code CLI (`claude -p`) — local login, has vision via the Read tool, so
+    it can also correct the Japanese OCR text from the page image.
 
-Two calls, both cached into workbook.json so re-renders never re-invoke claude:
-  correct_pages() — per page: Claude reads the page image (Read tool) + the
-    free-OCR draft and returns corrected Japanese + a natural English translation
-    per box, fixing the stylized-text errors manga-ocr makes.
-  comprehension()  — per chapter: questions about the story + an answer key.
-
-Output is requested as plain JSON and parsed here (the CLI has no schema mode).
+Both are opt-in and cached into workbook.json so re-renders never re-call them.
+Output is requested as plain JSON and parsed here.
 """
 import json
 import os
 import re
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
+from pathlib import Path
 
-# Webapp dropdown value -> `claude --model` alias (tracks the current release).
-ALLOWED_MODELS = ("opus", "sonnet", "haiku")
-DEFAULT_MODEL = "sonnet"
+# Model menu (webapp dropdown / CLI --model). DeepSeek first => default.
+DEEPSEEK_MODELS = ("deepseek-chat", "deepseek-reasoner")
+CLAUDE_MODELS = ("opus", "sonnet", "haiku")
+ALLOWED_MODELS = DEEPSEEK_MODELS + CLAUDE_MODELS
+DEFAULT_MODEL = "deepseek-chat"
 
 _TIMEOUT = 300  # seconds per page / chapter call
 _JSON = re.compile(r"(\{.*\}|\[.*\])", re.S)
 
+_DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+
+
+def _is_deepseek(model):
+    return model in DEEPSEEK_MODELS
+
+
+# --- DeepSeek (OpenAI-compatible HTTP API) -------------------------------------
+
+def _deepseek_key():
+    """Read the key from $DEEPSEEK_API_KEY, else a DEEPSEEK_API_KEY file in the
+    project root or CWD. The file holds just the raw `sk-...` key."""
+    key = os.environ.get("DEEPSEEK_API_KEY")
+    if key and key.strip():
+        return key.strip()
+    candidates = [
+        Path(__file__).resolve().parent.parent / "DEEPSEEK_API_KEY",  # project root
+        Path.cwd() / "DEEPSEEK_API_KEY",
+    ]
+    for p in candidates:
+        if p.is_file():
+            text = p.read_text(encoding="utf-8").strip()
+            # tolerate a `DEEPSEEK_API_KEY=sk-...` line too
+            return text.split("=", 1)[1].strip() if text.startswith("DEEPSEEK_API_KEY=") else text
+    raise RuntimeError(
+        "DeepSeek API key not found. Set $DEEPSEEK_API_KEY or put it in a "
+        "DEEPSEEK_API_KEY file in the project root."
+    )
+
+
+def _deepseek_chat(prompt, model, timeout=_TIMEOUT):
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "temperature": 0.3,  # translation/Q&A: favor consistency
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        _DEEPSEEK_URL, data=body, method="POST",
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {_deepseek_key()}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"DeepSeek API error {e.code}: {e.read().decode('utf-8', 'replace')[:400]}")
+    return data["choices"][0]["message"]["content"]
+
+
+# --- Claude Code CLI -----------------------------------------------------------
 
 def _claude_bin():
     exe = shutil.which("claude")
@@ -34,26 +88,38 @@ def _claude_bin():
     return exe
 
 
-def _run(prompt, model, allow_read, timeout=_TIMEOUT):
-    if model not in ALLOWED_MODELS:
-        raise ValueError(f"model must be one of {ALLOWED_MODELS}")
+def _claude_run(prompt, model, allow_read, timeout=_TIMEOUT):
     args = [_claude_bin(), "-p", "--model", model, "--output-format", "text"]
     if allow_read:
         args += ["--allowedTools", "Read"]  # pre-approve image reads, no prompt
-    proc = subprocess.run(args, input=prompt, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(args, input=prompt, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout)
     if proc.returncode != 0:
         raise RuntimeError(f"claude failed: {(proc.stderr or proc.stdout)[-800:]}")
     return proc.stdout
 
 
+def _run(prompt, model, allow_read, timeout=_TIMEOUT):
+    """Dispatch a text prompt to the selected provider. allow_read (image access)
+    applies only to Claude; DeepSeek is text-only and ignores it."""
+    if model not in ALLOWED_MODELS:
+        raise ValueError(f"model must be one of {ALLOWED_MODELS}")
+    if _is_deepseek(model):
+        return _deepseek_chat(prompt, model, timeout)
+    return _claude_run(prompt, model, allow_read, timeout)
+
+
 def _json_obj(text):
     m = _JSON.search(text)
     if not m:
-        raise RuntimeError(f"no JSON in claude output: {text[:300]}")
+        raise RuntimeError(f"no JSON in LLM output: {text[:300]}")
     return json.loads(m.group(1))
 
 
-_CORRECT = (
+# --- OCR correction / translation ----------------------------------------------
+
+# Claude (vision): fix the Japanese OCR text from the page image AND translate.
+_CORRECT_CLAUDE = (
     "You are a Japanese manga OCR corrector and translator.\n"
     "Look at the manga page image with the Read tool: {path}\n"
     "Below is a draft OCR of its text boxes as `id: text`. For EACH box return the "
@@ -66,35 +132,67 @@ _CORRECT = (
     "Draft OCR boxes:\n{draft}"
 )
 
+# DeepSeek (text-only): keep the Japanese as-is, just produce natural English.
+_TRANSLATE_DEEPSEEK = (
+    "You are a Japanese-to-English manga translator. Below are a manga page's text "
+    "boxes as `id: japanese`, in reading order. For EACH box return its id and a "
+    "natural, concise English translation that reads well in context (use an empty "
+    "string for pure sound effects/onomatopoeia). Do NOT change the Japanese. "
+    "Return EVERY id exactly once.\n"
+    'Output ONLY JSON, no prose, no markdown fences: '
+    '{{"boxes":[{{"id":1,"en":"..."}}]}}\n\n'
+    "Text boxes:\n{draft}"
+)
+
 
 def correct_pages(pages, model=DEFAULT_MODEL, on_progress=None):
     """pages: list of (filename, image_path, [{"id","text"}, ...]).
-    Returns {filename: {id: {"text","en"}}}. Pages with no boxes are skipped."""
+    Returns {filename: {id: {"text","en"}}}. Pages with no boxes are skipped.
+
+    Claude reads the image and may rewrite the Japanese `text`. DeepSeek is
+    text-only: it keeps the original Japanese and only improves the `en`."""
+    deepseek = _is_deepseek(model)
     out = {}
     total = len(pages)
     for i, (fname, img_path, boxes) in enumerate(pages, 1):
         if boxes:
             draft = "\n".join(f'{b["id"]}: {b["text"]}' for b in boxes)
-            prompt = _CORRECT.format(path=os.path.abspath(img_path), draft=draft)
-            data = _json_obj(_run(prompt, model, allow_read=True))
-            fixes = {}
-            for b in data.get("boxes", []):
-                try:
-                    fixes[int(b["id"])] = {"text": str(b.get("text", "")),
-                                           "en": str(b.get("en", ""))}
-                except (KeyError, ValueError, TypeError):
-                    continue
+            if deepseek:
+                prompt = _TRANSLATE_DEEPSEEK.format(draft=draft)
+                data = _json_obj(_run(prompt, model, allow_read=False))
+                originals = {b["id"]: b["text"] for b in boxes}
+                fixes = {}
+                for b in data.get("boxes", []):
+                    try:
+                        bid = int(b["id"])
+                    except (KeyError, ValueError, TypeError):
+                        continue
+                    # keep the OCR Japanese unchanged; only the translation is new
+                    fixes[bid] = {"text": originals.get(bid, ""), "en": str(b.get("en", ""))}
+            else:
+                prompt = _CORRECT_CLAUDE.format(path=os.path.abspath(img_path), draft=draft)
+                data = _json_obj(_run(prompt, model, allow_read=True))
+                fixes = {}
+                for b in data.get("boxes", []):
+                    try:
+                        fixes[int(b["id"])] = {"text": str(b.get("text", "")),
+                                               "en": str(b.get("en", ""))}
+                    except (KeyError, ValueError, TypeError):
+                        continue
             out[fname] = fixes
         if on_progress:
             on_progress(i, total)
     return out
 
 
+# --- Comprehension questions (in Japanese) -------------------------------------
+
 _QUESTIONS = (
     "You are a Japanese-language teacher. Given a manga chapter's dialogue "
     "(Japanese, with English where available), write {n} comprehension questions "
-    "in English about what happens, the characters, and their motivations, ordered "
-    "easy to hard, each with a short answer. Base answers only on the given text.\n"
+    "about what happens, the characters, and their motivations, ordered easy to "
+    "hard, each with a short answer. Write BOTH the questions AND the answers in "
+    "JAPANESE. Base answers only on the given text.\n"
     'Output ONLY JSON, no prose, no markdown fences: '
     '{{"items":[{{"question":"...","answer":"..."}}]}}\n\n'
     "Chapter: {chapter}\nDialogue:\n{body}"
@@ -102,7 +200,8 @@ _QUESTIONS = (
 
 
 def comprehension(chapter, lines, model=DEFAULT_MODEL, n=8):
-    """lines: list of (ja, en) across the chapter. Returns [{"q","a"}, ...]."""
+    """lines: list of (ja, en) across the chapter. Returns [{"q","a"}, ...]
+    with both question and answer in Japanese."""
     if not lines:
         return []
     body = "\n".join(f"- {ja}" + (f"  ({en})" if en else "") for ja, en in lines)
