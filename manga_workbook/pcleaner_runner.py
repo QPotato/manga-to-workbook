@@ -80,14 +80,16 @@ def _run(args, cache_dir: Path, n_images=None, on_progress=None):
     return proc
 
 
-def ocr_dir(input_dir: Path, csv_path: Path, on_progress=None) -> dict:
+def ocr_dir(input_dir: Path, csv_path: Path, on_progress=None, reuse=False) -> dict:
     """Run `pcleaner ocr`. Returns {filename: [box,...]} in reading order.
-    Each box: {x1,y1,x2,y2,text}. on_progress(done, total) fires per image."""
+    Each box: {x1,y1,x2,y2,text}. on_progress(done, total) fires per image.
+    reuse=True parses an existing csv (same inputs assumed) instead of re-running."""
     csv_path = Path(csv_path).resolve()  # pcleaner needs an absolute output path
     imgs = _sorted_paths(input_dir)
-    csv_path.unlink(missing_ok=True)  # pcleaner prompts (and EOFErrors) if it exists
-    _run(["ocr", *imgs, "--csv", "--output-path", str(csv_path)],
-         cache_dir=csv_path.parent / "pc_cache", n_images=len(imgs), on_progress=on_progress)
+    if not (reuse and csv_path.exists()):
+        csv_path.unlink(missing_ok=True)  # pcleaner prompts (and EOFErrors) if it exists
+        _run(["ocr", *imgs, "--csv", "--output-path", str(csv_path)],
+             cache_dir=csv_path.parent / "pc_cache", n_images=len(imgs), on_progress=on_progress)
     pages: dict = {}
     with open(csv_path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -161,15 +163,20 @@ def _reading_order(boxes):
     return ordered
 
 
-def clean_dir(input_dir: Path, out_dir: Path, on_progress=None) -> dict:
-    """Run `pcleaner clean`. Returns {original_filename: cleaned_image_path}."""
+def clean_dir(input_dir: Path, out_dir: Path, on_progress=None, reuse=False) -> dict:
+    """Run `pcleaner clean`. Returns {original_filename: cleaned_image_path}.
+    reuse=True keeps existing cleaned images when all inputs already have one."""
     out_dir = Path(out_dir).resolve()  # pcleaner writes nothing for a relative dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    for old in out_dir.rglob("*_clean.*"):  # avoid pcleaner's overwrite prompt
-        old.unlink()
     imgs = _sorted_paths(input_dir)
-    _run(["clean", *imgs, "--output_dir", str(out_dir), "--save-only-cleaned"],
-         cache_dir=out_dir.parent / "pc_cache", n_images=len(imgs), on_progress=on_progress)
+    have = {p.name for p in out_dir.rglob("*_clean.*")}
+    cached = bool(imgs) and all(
+        any(n.startswith(Path(i).stem + "_clean") for n in have) for i in imgs)
+    if not (reuse and cached):
+        for old in out_dir.rglob("*_clean.*"):  # avoid pcleaner's overwrite prompt
+            old.unlink()
+        _run(["clean", *imgs, "--output_dir", str(out_dir), "--save-only-cleaned"],
+             cache_dir=out_dir.parent / "pc_cache", n_images=len(imgs), on_progress=on_progress)
     cleaned = {p.name: p for p in out_dir.rglob("*_clean.*")}
     mapping = {}
     for img in imgs:

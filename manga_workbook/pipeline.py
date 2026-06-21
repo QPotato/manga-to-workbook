@@ -12,7 +12,7 @@ def list_images(input_dir: Path):
 
 
 def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
-        with_llm=False, llm_model=None):
+        with_llm=False, llm_model=None, reuse=False):
     """progress(frac 0..1, msg) is called at each stage boundary and per page.
     When with_llm is set, the free stages are compressed to leave room for the
     (slower) Claude correction + question stage; otherwise the budget is
@@ -44,13 +44,13 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
 
     emit(0.02, f"Reading text from {n} pages (OCR)...")
     ocr_pages = ocr_dir(
-        input_dir, work_dir / "ocr.csv",
+        input_dir, work_dir / "ocr.csv", reuse=reuse,
         on_progress=lambda d, t: emit(0.02 + (o_end - 0.02) * d / t, f"OCR: page {d}/{t}"),
     )
 
     emit(o_end, "Erasing speech bubbles (cleaning panels)...")
     cleaned_map = clean_dir(
-        input_dir, work_dir / "cleaned",
+        input_dir, work_dir / "cleaned", reuse=reuse,
         on_progress=lambda d, t: emit(o_end + (c_end - o_end) * d / t, f"Cleaning: page {d}/{t}"),
     )
 
@@ -103,5 +103,7 @@ if __name__ == "__main__":
     ap.add_argument("--with-llm", action="store_true",
                     help="Refine OCR/translation and add questions via the local `claude` CLI")
     ap.add_argument("--model", default=None, help="claude model: opus | sonnet | haiku (default sonnet)")
+    ap.add_argument("--reuse", action="store_true",
+                    help="reuse cached OCR/cleaned in the work dir (same inputs) instead of re-running")
     a = ap.parse_args()
-    run(a.input_dir, a.work, a.out, a.chapter, with_llm=a.with_llm, llm_model=a.model)
+    run(a.input_dir, a.work, a.out, a.chapter, with_llm=a.with_llm, llm_model=a.model, reuse=a.reuse)
