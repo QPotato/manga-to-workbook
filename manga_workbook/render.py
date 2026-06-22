@@ -5,6 +5,7 @@ blank practice copy) and a dialogue sheet (furigana + English). The vocabulary
 summary follows, then the exercises and answer-key appendix.
 """
 import base64
+import imghdr
 from pathlib import Path
 
 from weasyprint import HTML
@@ -14,7 +15,16 @@ CSS = """
 * { box-sizing: border-box; }
 body { font-family: "Noto Sans CJK JP", "Noto Serif CJK JP", "Yu Gothic",
        "Meiryo", "MS Gothic", sans-serif; color: #111; margin: 0; }
-ruby rt { font-size: 0.55em; }
+/* Furigana above the kanji. WeasyPrint has no native ruby layout (it renders
+   <rt> inline after the base), so place the reading with absolute positioning:
+   the <ruby> is an inline-block anchor on the normal baseline and the <rt> is
+   centered just above it. Containers holding ruby get extra line-height below so
+   the reading doesn't collide with the line above. */
+ruby { display: inline-block; position: relative; }
+ruby rt { position: absolute; bottom: 100%; left: -1em; right: -1em;
+          margin-bottom: -0.3em; font-size: 0.5em; line-height: 1; font-weight: normal;
+          text-align: center; white-space: nowrap; }
+.dialog .ja, .v .jp, .ex .item, .q .item, .answers .item { line-height: 2.0; }
 h1 { font-size: 22pt; }
 .summary h1 { margin-bottom: 12px; }
 /* Vocabulary list: block entries flowed in CSS multi-columns. Avoids the flex/
@@ -71,9 +81,14 @@ def _data_uri(path: Path) -> str:
     path = Path(path)
     if not path.exists():
         return ""
-    mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
-    b64 = base64.b64encode(path.read_bytes()).decode()
-    return f"data:{mime};base64,{b64}"
+    data = path.read_bytes()
+    # Sniff the real format: some sources are PNGs (often with alpha) mislabeled
+    # .jpg, and an image/jpeg data URI for PNG bytes won't decode.
+    kind = imghdr.what(None, h=data)
+    mime = {"png": "image/png", "jpeg": "image/jpeg", "webp": "image/webp",
+            "gif": "image/gif"}.get(kind) or (
+        "image/png" if path.suffix.lower() == ".png" else "image/jpeg")
+    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
 
 
 def _wordlist(words):

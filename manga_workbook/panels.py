@@ -109,6 +109,76 @@ def detect_panels(image_path):
     return panels
 
 
+# --- reading-order estimator ------------------------------------------------
+# Ported from manga109/panel-order-estimator (MIT, (c) 2022 Hikaru Ikuta):
+# the Kovanen et al. recursive binary space partition. Given a set of boxes it
+# finds the highest-priority pivot line that cleanly separates them -- horizontal
+# tiers (top->bottom) preferred, else vertical columns (right->left) -- recurses
+# on each side, and concatenates, yielding manga reading order. A box that
+# straddles a candidate pivot by more than _INTERCEPT_RATIO vetoes that pivot.
+# Works on any boxes (panels or text), so it replaces our hand-rolled tier sort.
+_INTERCEPT_RATIO = 0.25
+
+
+def _pivot_side(zmin, zmax, pivot):
+    """Side of `pivot` the span [zmin, zmax] sits on: 0 (>= pivot), 1 (<= pivot),
+    or -1 (straddles it too much, so this pivot can't be used)."""
+    if pivot <= zmin:
+        return 1
+    if zmax <= pivot:
+        return 0
+    r = (pivot - zmin) / (zmax - zmin)
+    if min(r, 1 - r) > _INTERCEPT_RATIO:
+        return -1
+    return 0 if r > 0.5 else 1
+
+
+def _split(boxes, pivot, horizontal):
+    """Partition boxes by `pivot` into (side0, side1) in reading order (side0
+    first): top before bottom for a horizontal pivot, right before left for a
+    vertical one. Returns None if a box straddles the pivot or one side is empty."""
+    side0, side1 = [], []
+    for b in boxes:
+        if horizontal:
+            s = _pivot_side(b["y1"], b["y2"], pivot)
+        else:  # negate x so "side 0" is the right (manga reads right-to-left)
+            s = _pivot_side(-b["x2"], -b["x1"], -pivot)
+        if s == -1:
+            return None
+        (side0 if s == 0 else side1).append(b)
+    if not side0 or not side1:
+        return None
+    return side0, side1
+
+
+def _highest_priority_division(boxes):
+    """Best clean split of `boxes`: try horizontal pivots first (every box edge,
+    top-down), then vertical (every box edge, right-to-left). None if undividable."""
+    for p in sorted([b["y1"] for b in boxes] + [b["y2"] for b in boxes]):
+        d = _split(boxes, p, horizontal=True)
+        if d:
+            return d
+    for p in sorted([b["x1"] for b in boxes] + [b["x2"] for b in boxes], reverse=True):
+        d = _split(boxes, p, horizontal=False)
+        if d:
+            return d
+    return None
+
+
+def order_boxes(boxes):
+    """Return `boxes` (dicts with x1/y1/x2/y2) in manga reading order via the
+    recursive binary space partition above. An undividable cluster (boxes that
+    overlap on both axes) falls back to a top-to-bottom, right-to-left sort."""
+    boxes = list(boxes)
+    if len(boxes) <= 1:
+        return boxes
+    div = _highest_priority_division(boxes)
+    if div is None:
+        return sorted(boxes, key=lambda b: ((b["y1"] + b["y2"]) / 2, -(b["x1"] + b["x2"]) / 2))
+    side0, side1 = div
+    return order_boxes(side0) + order_boxes(side1)
+
+
 def group_by_panel(boxes, panels):
     """Partition boxes into groups in panel reading order (by box centre). Boxes in
     no panel are returned as a final group so none are dropped. With no panels,

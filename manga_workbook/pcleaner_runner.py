@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from .panels import detect_panels, group_by_panel
+from .panels import detect_panels, group_by_panel, order_boxes
 
 VENV_BIN = Path(sys.executable).parent
 PCLEANER = str(VENV_BIN / "pcleaner")
@@ -124,7 +124,7 @@ def ocr_dir(input_dir: Path, csv_path: Path, on_progress=None, reuse=False) -> d
         panels = detect_panels(input_dir / fname)
         ordered = []
         for grp in group_by_panel(kept, panels):
-            ordered += _reading_order(grp)
+            ordered += order_boxes(grp)
         result[fname] = ordered
     return result
 
@@ -153,33 +153,30 @@ def _is_banner_box(box, page_w, page_h) -> bool:
     return aspect >= _BANNER_ASPECT and longside >= _BANNER_LONGSIDE
 
 
-def _reading_order(boxes):
-    """Sort text boxes into manga reading order: top-to-bottom tiers, each read
-    right-to-left. Boxes whose vertical centers fall within ~one line height form
-    one tier, and the tier centroid updates as boxes join so a tier with mildly
-    varying bubble heights stays together instead of splitting into top-to-bottom
-    singletons (which would break the right-to-left order). Complex multi-character
-    pages still need panel detection for perfect order."""
-    if not boxes:
-        return boxes
-    heights = sorted(b["y2"] - b["y1"] for b in boxes)
-    band = max(20, heights[len(heights) // 2])  # ~one median box height
-    rows = []
-    for b in sorted(boxes, key=lambda b: (b["y1"] + b["y2"]) / 2):
-        cy = (b["y1"] + b["y2"]) / 2
-        for row in rows:
-            if abs(cy - row["cy"]) <= band:
-                row["items"].append(b)
-                row["cy"] = sum((x["y1"] + x["y2"]) / 2 for x in row["items"]) / len(row["items"])
-                break
-        else:
-            rows.append({"cy": cy, "items": [b]})
-    rows.sort(key=lambda r: r["cy"])
-    ordered = []
-    for row in rows:
-        row["items"].sort(key=lambda b: (-b["x2"], b["y1"]))  # right edge first, then top
-        ordered += row["items"]
-    return ordered
+def _rgb_inputs(imgs, scratch):
+    """pcleaner writes the cleaned image in the input's file format, so an RGBA
+    (alpha) source fails to save as JPEG ("cannot write mode RGBA as JPEG").
+    Flatten any non-RGB input onto white into a scratch dir and swap those paths
+    in, keeping the filename so the later *_clean mapping still matches."""
+    conv_dir = scratch / "rgb_src"
+    out = []
+    for p in imgs:
+        p = Path(p)
+        try:
+            with Image.open(p) as im:
+                if im.mode in ("RGB", "L"):
+                    out.append(p)
+                    continue
+                im = im.convert("RGBA")
+                flat = Image.new("RGB", im.size, (255, 255, 255))
+                flat.paste(im, mask=im.split()[-1])
+                conv_dir.mkdir(parents=True, exist_ok=True)
+                dest = conv_dir / p.name
+                flat.save(dest, quality=95)
+                out.append(dest)
+        except Exception:
+            out.append(p)  # let pcleaner surface a real error rather than guessing
+    return out
 
 
 def clean_dir(input_dir: Path, out_dir: Path, on_progress=None, reuse=False) -> dict:
@@ -187,7 +184,7 @@ def clean_dir(input_dir: Path, out_dir: Path, on_progress=None, reuse=False) -> 
     reuse=True keeps existing cleaned images when all inputs already have one."""
     out_dir = Path(out_dir).resolve()  # pcleaner writes nothing for a relative dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    imgs = _sorted_paths(input_dir)
+    imgs = _rgb_inputs(_sorted_paths(input_dir), out_dir.parent)
     have = {p.name for p in out_dir.rglob("*_clean.*")}
     cached = bool(imgs) and all(
         any(n.startswith(Path(i).stem + "_clean") for n in have) for i in imgs)

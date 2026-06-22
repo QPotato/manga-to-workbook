@@ -78,8 +78,18 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
         apply_corrections(workbook, corrections)
         emit(f_correct, "AI: writing comprehension questions...")
         lines = [(d["plain"], d.get("en", "")) for p in workbook["pages"] for d in p["dialog"]]
-        workbook["questions"] = llm.comprehension(chapter, lines, model)
-        workbook["grammar"] = llm.grammar(chapter, lines, model)
+        # Degrade gracefully: a JSON failure on these chapter-level calls leaves the
+        # section empty rather than discarding the whole (already-built) workbook.
+        try:
+            workbook["questions"] = llm.comprehension(chapter, lines, model)
+        except RuntimeError as e:
+            log(f"AI: comprehension questions skipped: {e}")
+            workbook["questions"] = []
+        try:
+            workbook["grammar"] = llm.grammar(chapter, lines, model)
+        except RuntimeError as e:
+            log(f"AI: grammar notes skipped: {e}")
+            workbook["grammar"] = []
         emit(f_quest, "AI stage done.")
 
     (work_dir / "workbook.json").write_text(

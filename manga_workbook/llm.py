@@ -15,7 +15,9 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -27,6 +29,7 @@ ALLOWED_MODELS = DEEPSEEK_MODELS + CLAUDE_MODELS
 DEFAULT_MODEL = "deepseek-chat"
 
 _TIMEOUT = 300  # seconds per page / chapter call
+_NET_RETRIES = 3  # transient network failures (timeouts, dropped connections)
 _JSON = re.compile(r"(\{.*\}|\[.*\])", re.S)
 
 _DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
@@ -65,18 +68,30 @@ def _deepseek_chat(prompt, model, timeout=_TIMEOUT):
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "temperature": 0.3,  # translation/Q&A: favor consistency
+        # All our prompts request JSON; this makes DeepSeek emit a single valid
+        # JSON object instead of occasionally fenced/truncated text.
+        "response_format": {"type": "json_object"},
+        "max_tokens": 8192,  # avoid truncating long per-page box lists mid-JSON
     }).encode("utf-8")
     req = urllib.request.Request(
         _DEEPSEEK_URL, data=body, method="POST",
         headers={"Content-Type": "application/json",
                  "Authorization": f"Bearer {_deepseek_key()}"},
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"DeepSeek API error {e.code}: {e.read().decode('utf-8', 'replace')[:400]}")
-    return data["choices"][0]["message"]["content"]
+    # Retry transient network failures (read timeouts, dropped connections). All
+    # failures end as RuntimeError so callers can skip a page instead of crashing.
+    last = None
+    for attempt in range(1, _NET_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"DeepSeek API error {e.code}: {e.read().decode('utf-8', 'replace')[:400]}")
+        except (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError) as e:
+            last = e
+            time.sleep(2 * attempt)  # brief backoff before retrying
+    raise RuntimeError(f"DeepSeek network error after {_NET_RETRIES} attempts: {last}")
 
 
 # --- Claude Code CLI -----------------------------------------------------------
@@ -112,8 +127,27 @@ def _run(prompt, model, allow_read, timeout=_TIMEOUT):
 def _json_obj(text):
     m = _JSON.search(text)
     if not m:
-        raise RuntimeError(f"no JSON in LLM output: {text[:300]}")
-    return json.loads(m.group(1))
+        raise ValueError(f"no JSON in LLM output: {text[:300]}")
+    return json.loads(m.group(1))  # raises json.JSONDecodeError on malformed JSON
+
+
+_JSON_RETRIES = 3  # LLMs occasionally emit malformed/fenced JSON; re-ask a few times
+
+
+def _run_json(prompt, model, allow_read, timeout=_TIMEOUT):
+    """Call the LLM and parse its reply as JSON, retrying the whole call when the
+    reply isn't valid JSON (DeepSeek in particular sometimes breaks the format).
+    Re-raises the last parse error after _JSON_RETRIES attempts."""
+    last = None
+    for attempt in range(1, _JSON_RETRIES + 1):
+        text = _run(prompt, model, allow_read, timeout)
+        try:
+            return _json_obj(text)
+        except (ValueError, json.JSONDecodeError) as e:  # JSONDecodeError subclasses ValueError
+            last = e
+    raise RuntimeError(
+        f"LLM returned no valid JSON after {_JSON_RETRIES} attempts: {last}"
+    )
 
 
 # --- OCR correction / translation ----------------------------------------------
@@ -157,28 +191,34 @@ def correct_pages(pages, model=DEFAULT_MODEL, on_progress=None):
     for i, (fname, img_path, boxes) in enumerate(pages, 1):
         if boxes:
             draft = "\n".join(f'{b["id"]}: {b["text"]}' for b in boxes)
-            if deepseek:
-                prompt = _TRANSLATE_DEEPSEEK.format(draft=draft)
-                data = _json_obj(_run(prompt, model, allow_read=False))
-                originals = {b["id"]: b["text"] for b in boxes}
+            # A single page that the LLM can't return valid JSON for must not abort
+            # the whole book: skip it (keep the original OCR + opus-mt EN) and go on.
+            try:
+                if deepseek:
+                    prompt = _TRANSLATE_DEEPSEEK.format(draft=draft)
+                    data = _run_json(prompt, model, allow_read=False)
+                    originals = {b["id"]: b["text"] for b in boxes}
+                    fixes = {}
+                    for b in data.get("boxes", []):
+                        try:
+                            bid = int(b["id"])
+                        except (KeyError, ValueError, TypeError):
+                            continue
+                        # keep the OCR Japanese unchanged; only the translation is new
+                        fixes[bid] = {"text": originals.get(bid, ""), "en": str(b.get("en", ""))}
+                else:
+                    prompt = _CORRECT_CLAUDE.format(path=os.path.abspath(img_path), draft=draft)
+                    data = _run_json(prompt, model, allow_read=True)
+                    fixes = {}
+                    for b in data.get("boxes", []):
+                        try:
+                            fixes[int(b["id"])] = {"text": str(b.get("text", "")),
+                                                   "en": str(b.get("en", ""))}
+                        except (KeyError, ValueError, TypeError):
+                            continue
+            except RuntimeError as e:
+                print(f"  LLM correction failed for {fname}, keeping original: {e}")
                 fixes = {}
-                for b in data.get("boxes", []):
-                    try:
-                        bid = int(b["id"])
-                    except (KeyError, ValueError, TypeError):
-                        continue
-                    # keep the OCR Japanese unchanged; only the translation is new
-                    fixes[bid] = {"text": originals.get(bid, ""), "en": str(b.get("en", ""))}
-            else:
-                prompt = _CORRECT_CLAUDE.format(path=os.path.abspath(img_path), draft=draft)
-                data = _json_obj(_run(prompt, model, allow_read=True))
-                fixes = {}
-                for b in data.get("boxes", []):
-                    try:
-                        fixes[int(b["id"])] = {"text": str(b.get("text", "")),
-                                               "en": str(b.get("en", ""))}
-                    except (KeyError, ValueError, TypeError):
-                        continue
             out[fname] = fixes
         if on_progress:
             on_progress(i, total)
@@ -205,8 +245,8 @@ def comprehension(chapter, lines, model=DEFAULT_MODEL, n=8):
     if not lines:
         return []
     body = "\n".join(f"- {ja}" + (f"  ({en})" if en else "") for ja, en in lines)
-    data = _json_obj(_run(_QUESTIONS.format(n=n, chapter=chapter, body=body),
-                          model, allow_read=False))
+    data = _run_json(_QUESTIONS.format(n=n, chapter=chapter, body=body),
+                     model, allow_read=False)
     return [{"q": str(q.get("question", "")), "a": str(q.get("answer", ""))}
             for q in data.get("items", [])]
 
@@ -227,7 +267,7 @@ def grammar(chapter, lines, model=DEFAULT_MODEL, n=6):
     if not lines:
         return []
     body = "\n".join(f"- {ja}" for ja, _ in lines)
-    data = _json_obj(_run(_GRAMMAR.format(n=n, chapter=chapter, body=body),
-                          model, allow_read=False))
+    data = _run_json(_GRAMMAR.format(n=n, chapter=chapter, body=body),
+                     model, allow_read=False)
     return [{"point": str(q.get("point", "")), "explain": str(q.get("explain", "")),
              "example": str(q.get("example", ""))} for q in data.get("items", [])]
