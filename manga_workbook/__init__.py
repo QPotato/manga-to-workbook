@@ -1,1 +1,1 @@
-"""Manga -> Japanese study workbook. Decoupled core pipeline (no web deps)."""
+"""Comic -> English study workbook (en->es). Decoupled core pipeline (no web deps)."""

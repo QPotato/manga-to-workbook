@@ -1,10 +1,14 @@
-"""Assemble the workbook data structure from OCR boxes + cleaned images."""
+"""Assemble the workbook data structure from OCR boxes + cleaned images.
+
+Data model (en->es): each dialog line is {text: <English>, es: <Spanish>, tokens,
+ocr?}; each vocab entry is {word: <English>, es: <Spanish gloss>, level: <band>}.
+"""
 from collections import Counter
 
 from .dictionary import gloss as dict_gloss
 from .exercises import build_exercises
-from .jlpt import label as jlpt_label
-from .language import extract_words, furigana_html, tokens as tokenize
+from .level import label as level_label
+from .language import extract_words, tokens as tokenize
 
 
 # Cap each per-page header word list so text-dense pages (covers, splash pages)
@@ -24,22 +28,21 @@ def _dedupe(seq):
 
 
 def _make_page(fname, cleaned_path, texts):
-    """Build one page from texts = list of (plain, en, ocr_or_None).
-    `ocr` is the pre-correction text kept for reference when an LLM rewrote `plain`.
+    """Build one page from texts = list of (text, es, ocr_or_None).
+    `ocr` is the pre-correction text kept for reference when an LLM rewrote `text`.
     Stores raw per-page words under `_words` so the summary/exercises can be
     recomputed after an LLM correction pass without re-tokenizing the whole book.
     """
     dialog, verbs, nouns, adjs = [], [], [], []
-    for plain, en, ocr in texts:
-        plain = plain.strip()
-        if not plain:
+    for text, es, ocr in texts:
+        text = text.strip()
+        if not text:
             continue
-        d = {"plain": plain, "furigana": furigana_html(plain), "en": en or "",
-             "tokens": tokenize(plain)}
-        if ocr is not None and ocr != plain:
+        d = {"text": text, "es": es or "", "tokens": tokenize(text)}
+        if ocr is not None and ocr != text:
             d["ocr"] = ocr  # original OCR, kept when the LLM corrected the line
         dialog.append(d)
-        w = extract_words(plain)
+        w = extract_words(text)
         verbs += w["verbs"]
         nouns += w["nouns"]
         adjs += w["adjectives"]
@@ -47,9 +50,9 @@ def _make_page(fname, cleaned_path, texts):
         "filename": fname,
         "cleaned_path": str(cleaned_path or ""),
         "header": {
-            "verbs": [furigana_html(w) for w in _dedupe(verbs)[:HEADER_MAX]],
-            "nouns": [furigana_html(w) for w in _dedupe(nouns)[:HEADER_MAX]],
-            "adjectives": [furigana_html(w) for w in _dedupe(adjs)[:HEADER_MAX]],
+            "verbs": _dedupe(verbs)[:HEADER_MAX],
+            "nouns": _dedupe(nouns)[:HEADER_MAX],
+            "adjectives": _dedupe(adjs)[:HEADER_MAX],
         },
         "_words": {"verbs": verbs, "nouns": nouns, "adjectives": adjs},
         "dialog": dialog,
@@ -57,11 +60,10 @@ def _make_page(fname, cleaned_path, texts):
 
 
 def _enrich(words, category):
-    # Dictionary glosses (offline JMdict), not opus-mt: single words need a
-    # dictionary, not a sentence translator. Always on; needs no torch.
+    # Dictionary glosses (offline FreeDict en->es), not opus-mt: single words need
+    # a dictionary, not a sentence translator. Always on; needs no torch.
     return [
-        {"word": w, "furigana": furigana_html(w), "en": dict_gloss(w, category),
-         "jlpt": jlpt_label(w)}
+        {"word": w, "es": dict_gloss(w, category), "level": level_label(w)}
         for w in words
     ]
 
@@ -99,9 +101,9 @@ def build_workbook(ordered_files, ocr_pages, cleaned_map, chapter="chapter",
         page = _make_page(fname, cleaned_map.get(fname, ""),
                           [(b["text"], "", None) for b in boxes])
         if translate and page["dialog"]:
-            ens = translate_lines([d["plain"] for d in page["dialog"]])
-            for d, en in zip(page["dialog"], ens):
-                d["en"] = en
+            ess = translate_lines([d["text"] for d in page["dialog"]])
+            for d, es in zip(page["dialog"], ess):
+                d["es"] = es
         if on_page:
             on_page(pi, len(ordered_files))
         pages.append(page)
@@ -111,7 +113,7 @@ def build_workbook(ordered_files, ocr_pages, cleaned_map, chapter="chapter",
 
 def apply_corrections(wb, corrections):
     """Replace each page's dialogue with LLM-corrected text + translation, then
-    recompute headers/summary/exercises. corrections: {filename: {id: {text, en}}}
+    recompute headers/summary/exercises. corrections: {filename: {id: {text, es}}}
     where id is the 1-based index of the line in that page's (free) dialog."""
     new_pages = []
     for p in wb["pages"]:
@@ -123,9 +125,9 @@ def apply_corrections(wb, corrections):
         for i, d in enumerate(p["dialog"], 1):
             f = fix.get(i)
             if f and f.get("text", "").strip():
-                texts.append((f["text"], f.get("en", ""), d["plain"]))
+                texts.append((f["text"], f.get("es", ""), d["text"]))
             else:  # no correction for this line -> keep the free version
-                texts.append((d["plain"], d.get("en", ""), d.get("ocr")))
+                texts.append((d["text"], d.get("es", ""), d.get("ocr")))
         new_pages.append(_make_page(p["filename"], p["cleaned_path"], texts))
     wb["pages"] = new_pages
     return _finalize(wb)

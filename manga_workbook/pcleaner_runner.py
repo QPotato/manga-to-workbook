@@ -1,9 +1,15 @@
-"""Wrappers around the pcleaner CLI: OCR (boxes+text) and clean (blank pages)."""
-import csv
+"""OCR via EasyOCR (text boxes); cleaning via the pcleaner CLI (erase bubbles).
+
+EasyOCR reads the English text and returns reading-ordered boxes; pcleaner's
+clean step (detection + inpainting, script-agnostic) still produces the blank
+write-on page. pcleaner's own manga-ocr recogniser is unused here.
+"""
+import json
 import os
 import re
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image
@@ -17,6 +23,42 @@ IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 _NUM = re.compile(r"(\d+)")
 _PROG = re.compile(r"(\d+)/(\d+)")
+
+# EasyOCR tuning. paragraph=True merges nearby lines into one box per speech
+# bubble, which reads far better than per-line fragments (and matches how the old
+# bubble-level OCR behaved). MIN_CONF drops junk detections; paragraph mode omits
+# a confidence so the filter is a no-op there.
+_OCR_LANGS = ["en"]
+_OCR_PARAGRAPH = True
+_OCR_MIN_CONF = 0.30
+
+
+@lru_cache(maxsize=1)
+def _reader():
+    import easyocr
+    import torch
+
+    return easyocr.Reader(_OCR_LANGS, gpu=torch.cuda.is_available())
+
+
+def _ocr_image(path: Path) -> list:
+    """Run EasyOCR on one image -> [{x1,y1,x2,y2,text}, ...] (unordered)."""
+    try:
+        results = _reader().readtext(str(path), paragraph=_OCR_PARAGRAPH)
+    except Exception:
+        return []
+    boxes = []
+    for item in results:
+        bbox, text = item[0], item[1]
+        conf = item[2] if len(item) > 2 else 1.0
+        text = (text or "").strip()
+        if not text or conf < _OCR_MIN_CONF:
+            continue
+        xs = [p[0] for p in bbox]
+        ys = [p[1] for p in bbox]
+        boxes.append({"x1": int(min(xs)), "y1": int(min(ys)),
+                      "x2": int(max(xs)), "y2": int(max(ys)), "text": text})
+    return boxes
 
 
 def _natkey(name: str):
@@ -40,7 +82,7 @@ def _run(args, cache_dir: Path, n_images=None, on_progress=None):
     # Isolate pcleaner's working cache per job so concurrent runs don't clobber
     # each other's temp files (XDG_CACHE_HOME controls where pcleaner writes).
     cache_dir.mkdir(parents=True, exist_ok=True)
-    # Force UTF-8 I/O: pcleaner prints OCR'd Japanese to stdout, which crashes on
+    # Force UTF-8 I/O: pcleaner prints non-ASCII to stdout, which crashes on
     # Windows' default cp1252 codec (UnicodeEncodeError). We also decode its output
     # as UTF-8 below to match.
     env = {
@@ -93,47 +135,45 @@ def _run(args, cache_dir: Path, n_images=None, on_progress=None):
     return proc
 
 
-def ocr_dir(input_dir: Path, csv_path: Path, on_progress=None, reuse=False) -> dict:
-    """Run `pcleaner ocr`. Returns {filename: [box,...]} in reading order.
+def ocr_dir(input_dir: Path, cache_path: Path, on_progress=None, reuse=False, rtl=True) -> dict:
+    """OCR every page with EasyOCR. Returns {filename: [box,...]} in reading order.
     Each box: {x1,y1,x2,y2,text}. on_progress(done, total) fires per image.
-    reuse=True parses an existing csv (same inputs assumed) instead of re-running."""
-    csv_path = Path(csv_path).resolve()  # pcleaner needs an absolute output path
-    imgs = _sorted_paths(input_dir)
-    if not (reuse and csv_path.exists()):
-        csv_path.unlink(missing_ok=True)  # pcleaner prompts (and EOFErrors) if it exists
-        _run(["ocr", *imgs, "--csv", "--output-path", str(csv_path)],
-             cache_dir=csv_path.parent / "pc_cache", n_images=len(imgs), on_progress=on_progress)
-    pages: dict = {}
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            pages.setdefault(row["filename"], []).append(
-                {
-                    "x1": int(row["startx"]),
-                    "y1": int(row["starty"]),
-                    "x2": int(row["endx"]),
-                    "y2": int(row["endy"]),
-                    "text": row["text"],
-                }
-            )
+    reuse=True loads a cached JSON of boxes (same inputs assumed) instead of re-running.
+    rtl=True orders panels/boxes right-to-left (manga); rtl=False is Western LTR."""
+    cache_path = Path(cache_path)
+    names = list_image_names(input_dir)
+    if reuse and cache_path.exists():
+        pages = json.loads(cache_path.read_text(encoding="utf-8"))
+    else:
+        pages = {}
+        for i, name in enumerate(names, 1):
+            pages[name] = _ocr_image(input_dir / name)
+            if on_progress:
+                on_progress(i, len(names))
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(pages, ensure_ascii=False), encoding="utf-8")
     result = {}
-    for fname, boxes in pages.items():
-        pw, ph = _page_size(input_dir / fname)
+    for name in names:
+        boxes = pages.get(name, [])
+        pw, ph = _page_size(input_dir / name)
         kept = [b for b in boxes if not _is_banner_box(b, pw, ph)]
-        # Panel-aware order: split the page into panels (manga reading order) and
-        # sort boxes within each. Falls back to a flat sort when no panels found.
-        panels = detect_panels(input_dir / fname)
+        # Panel-aware order: split the page into panels (manga or Western reading
+        # order) and sort boxes within each. Falls back to a flat sort when no panels.
+        panels = detect_panels(input_dir / name, rtl=rtl)
         ordered = []
         for grp in group_by_panel(kept, panels):
-            ordered += order_boxes(grp)
-        result[fname] = ordered
+            ordered += order_boxes(grp, rtl=rtl)
+        result[name] = ordered
     return result
 
 
-# Cover/spine/banner display text: extreme aspect ratio + large. manga-ocr is
-# trained on speech bubbles and badly garbles these (e.g. コードギアス spine ->
-# "コードやアス、髪型ルーション"), so they poison furigana/vocab/translation. Drop them.
-_BANNER_ASPECT = 6.0     # long:short side ratio
-_BANNER_LONGSIDE = 0.4   # long side as a fraction of the page
+# Page-dominating display text (big title / SFX overlays) OCRs into junk "vocab",
+# so drop it. Unlike a normal speech bubble — wide but a modest share of the page —
+# a banner spans most of the width AND a large share of the height (big lettering).
+# (Aspect-ratio filtering is wrong here: a normal horizontal line of dialogue is
+# naturally wide, so it would be dropped.)
+_BANNER_WIDTH = 0.60    # box width as a fraction of the page
+_BANNER_HEIGHT = 0.18   # box height as a fraction of the page
 
 
 def _page_size(path: Path):
@@ -148,9 +188,7 @@ def _is_banner_box(box, page_w, page_h) -> bool:
     w, h = box["x2"] - box["x1"], box["y2"] - box["y1"]
     if w <= 0 or h <= 0 or page_w <= 0 or page_h <= 0:
         return False
-    aspect = max(w / h, h / w)
-    longside = max(w / page_w, h / page_h)
-    return aspect >= _BANNER_ASPECT and longside >= _BANNER_LONGSIDE
+    return (w / page_w) >= _BANNER_WIDTH and (h / page_h) >= _BANNER_HEIGHT
 
 
 def _rgb_inputs(imgs, scratch):

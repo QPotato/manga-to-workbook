@@ -13,7 +13,7 @@ def list_images(input_dir: Path):
 
 
 def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
-        with_llm=False, llm_model=None, reuse=False):
+        with_llm=False, llm_model=None, reuse=False, rtl=True):
     """progress(frac 0..1, msg) is called at each stage boundary and per page.
     When with_llm is set, the free stages are compressed to leave room for the
     (slower) Claude correction + question stage; otherwise the budget is
@@ -43,9 +43,9 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
     n = len(ordered)
     o_end, c_end, a_end = (f_ocr, f_clean, f_analyze) if with_llm else (0.42, 0.77, 0.94)
 
-    emit(0.02, f"Reading text from {n} pages (OCR)...")
+    emit(0.02, f"Reading English text from {n} pages (OCR)...")
     ocr_pages = ocr_dir(
-        input_dir, work_dir / "ocr.csv", reuse=reuse,
+        input_dir, work_dir / "ocr.json", reuse=reuse, rtl=rtl,
         on_progress=lambda d, t: emit(0.02 + (o_end - 0.02) * d / t, f"OCR: page {d}/{t}"),
     )
 
@@ -55,7 +55,7 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
         on_progress=lambda d, t: emit(o_end + (c_end - o_end) * d / t, f"Cleaning: page {d}/{t}"),
     )
 
-    emit(c_end, "Adding furigana, extracting words, translating...")
+    emit(c_end, "Extracting words and translating to Spanish...")
 
     def on_page(i, total):
         emit(c_end + (a_end - c_end) * (i / total), f"Analyzing page {i}/{total}...")
@@ -70,7 +70,7 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
         emit(a_end, f"AI ({model}): correcting OCR and translations...")
         pages_arg = [
             (p["filename"], str(input_dir / p["filename"]),
-             [{"id": i, "text": d["plain"]} for i, d in enumerate(p["dialog"], 1)])
+             [{"id": i, "text": d["text"]} for i, d in enumerate(p["dialog"], 1)])
             for p in workbook["pages"]
         ]
         corrections = llm.correct_pages(
@@ -79,7 +79,7 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
         )
         apply_corrections(workbook, corrections)
         emit(f_correct, "AI: writing comprehension questions...")
-        lines = [(d["plain"], d.get("en", "")) for p in workbook["pages"] for d in p["dialog"]]
+        lines = [(d["text"], d.get("es", "")) for p in workbook["pages"] for d in p["dialog"]]
         # Degrade gracefully: a JSON failure on these chapter-level calls leaves the
         # section empty rather than discarding the whole (already-built) workbook.
         try:
@@ -121,11 +121,14 @@ if __name__ == "__main__":
     ap.add_argument("-w", "--work", default="work")
     ap.add_argument("-c", "--chapter")
     ap.add_argument("--with-llm", action="store_true",
-                    help="Refine translations and add Japanese comprehension questions + grammar")
+                    help="Refine translations and add Spanish comprehension questions + grammar")
     ap.add_argument("--model", default=None,
                     help="LLM model: deepseek-chat | deepseek-reasoner (DeepSeek API, default) "
                          "| opus | sonnet | haiku (local claude CLI, also fixes OCR)")
     ap.add_argument("--reuse", action="store_true",
                     help="reuse cached OCR/cleaned in the work dir (same inputs) instead of re-running")
+    ap.add_argument("--ltr", action="store_true",
+                    help="left-to-right reading order (Western comics); default is right-to-left (manga)")
     a = ap.parse_args()
-    run(a.input_dir, a.work, a.out, a.chapter, with_llm=a.with_llm, llm_model=a.model, reuse=a.reuse)
+    run(a.input_dir, a.work, a.out, a.chapter, with_llm=a.with_llm, llm_model=a.model,
+        reuse=a.reuse, rtl=not a.ltr)

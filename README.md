@@ -1,5 +1,5 @@
 ---
-title: Manga To Workbook
+title: Comic To English Workbook
 emoji: 📖
 colorFrom: indigo
 colorTo: blue
@@ -8,73 +8,70 @@ app_port: 7860
 pinned: false
 ---
 
-# Manga → Japanese Study Workbook
+# Comic → English Study Workbook (for Spanish speakers)
 
-Turn a manga chapter (a folder of page images) into a printable Japanese study
-workbook PDF: vocabulary summary, per-page verb/noun/adjective lists, original page
-beside a text-cleaned "write here" copy, and the dialogue with furigana.
+A spin-off of *manga-to-workbook*, retargeted **English → Spanish**: turn an
+English comic chapter (a folder of page images) into a printable study workbook
+PDF for Spanish-speaking learners — a Spanish-glossed vocabulary summary,
+per-page verb/noun/adjective lists, the original page beside a text-cleaned
+"write here" copy, and the dialogue with a Spanish translation.
+
+> This branch (`english-for-spanish`) is a dedicated fork. The Japanese version
+> lives on `features/study-tools`; the alphabet-specific features (furigana,
+> kanji readings, stroke order, JLPT) are dropped here.
 
 ## How it works
 
-1. **OCR + text boxes** — [`pcleaner ocr`](https://pypi.org/project/pcleaner/) detects
-   speech bubbles, OCRs them (manga-ocr inside), and returns reading-ordered text.
-2. **Clean** — `pcleaner clean` erases bubble text → blank practice page.
-3. **Furigana + POS** — [`fugashi`](https://pypi.org/project/fugashi/) (MeCab/unidic)
-   adds hiragana readings and extracts verbs (dictionary form), nouns, adjectives.
-4. **Render** — [WeasyPrint](https://weasyprint.org/) builds the PDF.
-
-All dependencies come from **PyPI** — no local source checkouts needed.
+1. **OCR + text boxes** — [EasyOCR](https://pypi.org/project/easyocr/) reads the
+   English text and returns boxes; they're grouped into panels and ordered in
+   reading order. The default is **right-to-left** (officially-translated manga
+   keeps the original Japanese layout); pass `--ltr` for left-to-right Western comics.
+2. **Clean** — [`pcleaner clean`](https://pypi.org/project/pcleaner/) erases bubble
+   text → blank practice page (detection + inpainting; script-agnostic).
+3. **Analyse** — [spaCy](https://spacy.io/) (`en_core_web_sm`) tokenizes, lemmatizes
+   and tags, extracting verbs/nouns/adjectives in dictionary form.
+4. **Gloss + level** — an offline FreeDict **en→es** dictionary gives the Spanish
+   gloss; [`wordfreq`](https://pypi.org/project/wordfreq/) maps corpus frequency to
+   a CEFR-style band (A1…C2).
+5. **Translate** — [`Helsinki-NLP/opus-mt-en-es`](https://huggingface.co/Helsinki-NLP/opus-mt-en-es)
+   gives the Spanish translation of each line (offline, no key).
+6. **Render** — [WeasyPrint](https://weasyprint.org/) builds the PDF.
 
 The pipeline runs on **CPU by default and uses a CUDA GPU automatically when one is
-available** — pcleaner (OCR + cleaning) and the translation model both detect CUDA at
-runtime. There is no flag to set: install the GPU build of PyTorch and it just uses it.
-
-## Install (Linux / macOS, CPU)
-
-```bash
-python3.11 -m venv .venv && source .venv/bin/activate
-# CPU-only torch first (avoids the multi-GB CUDA download):
-pip install torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements.txt
-```
-Needs a Japanese font installed (e.g. `fonts-noto-cjk`).
+available** — EasyOCR, pcleaner, and the translation model all detect CUDA at
+runtime. No flag to set: install the GPU build of PyTorch and it just uses it.
 
 ## Install (Windows, with NVIDIA GPU)
 
-The whole thing is much faster on a GPU. On a Windows desktop with an NVIDIA card:
-
-1. **Install Python 3.11** (python.org) and create a venv:
+1. **Python 3.10/3.11** and a venv:
    ```powershell
    py -3.11 -m venv .venv
    .venv\Scripts\activate
    ```
-2. **Install the CUDA build of PyTorch first.** Pick the index URL matching your CUDA
-   version (check `nvidia-smi`; `cu124` works for recent drivers):
+2. **Install the CUDA build of PyTorch first** (check `nvidia-smi`; `cu124` works
+   for recent drivers — a Pascal 1080 Ti needs `torch>=2.6.0+cu124`):
    ```powershell
    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+   python -c "import torch; print(torch.cuda.is_available())"
    ```
-   Verify it sees the GPU:
-   ```powershell
-   python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-   ```
-3. **Install the rest:**
+3. **Install the rest, then the spaCy model:**
    ```powershell
    pip install -r requirements.txt
+   python -m spacy download en_core_web_sm
    ```
-4. **WeasyPrint needs the GTK runtime on Windows** (for Pango/Cairo). Install the
-   *GTK3 runtime for Windows* (e.g. the `tschoonj/GTK-for-Windows-Runtime-Environment-Installer`
-   release), then restart the terminal. Without it, PDF rendering fails on import.
-5. **Japanese font:** Windows ships *Yu Gothic* / *MS Gothic*, which the PDF already
-   falls back to — nothing to install. (Installing Noto CJK gives nicer output.)
+4. **WeasyPrint needs the GTK3 runtime on Windows** (Pango/Cairo). Install the
+   *GTK3 runtime for Windows*, then restart the terminal.
 
-Then run it exactly as below; pcleaner and the translator will use the GPU on their own.
-The first run downloads the model weights (a few hundred MB).
+CPU-only: swap step 2 for `--index-url https://download.pytorch.org/whl/cpu`.
+
+The first run downloads model weights (EasyOCR + opus-mt, a few hundred MB).
 
 ## Use
 
 CLI:
 ```bash
-python -m manga_workbook.pipeline <image_dir> -o workbook.pdf
+python -m manga_workbook.pipeline <image_dir> -o workbook.pdf        # manga (RTL)
+python -m manga_workbook.pipeline <image_dir> -o workbook.pdf --ltr  # Western comic (LTR)
 ```
 
 Web (drop images → download PDF):
@@ -82,50 +79,67 @@ Web (drop images → download PDF):
 python app.py   # http://127.0.0.1:5000
 ```
 
+Optional AI refinement (`--with-llm`): natural Spanish translations + Spanish
+comprehension questions & grammar notes, via the DeepSeek API
+(`DEEPSEEK_API_KEY`) or the local `claude` CLI (which can also correct the
+English OCR against the page image).
+
 ### Interactive HTML reader
 
-Besides the print PDF, the pipeline's data (`workbook.json`, written to the work dir)
-can be turned into a self-contained **browser study reader**: each page's panel with
-its dialogue, a global furigana toggle (hide readings to quiz yourself), per-line
-English reveal, the vocabulary summary with JLPT badges, and optional per-line audio.
-One HTML file, images inlined, no server:
-
 ```bash
-python -m manga_workbook.reader work/workbook.json <image_dir> -o reader.html
-python -m manga_workbook.reader work/workbook.json <image_dir> -o reader.html --audio
+python -m manga_workbook.reader work/workbook.json <image_dir> -o reader.html [--audio]
 ```
+Each panel with its dialogue, a "show translation" toggle (hide the Spanish to
+quiz comprehension), per-line Spanish reveal, the Spanish-glossed vocabulary with
+level badges, and optional per-line **English** audio (`--audio`, edge-tts; pick a
+voice with `--voice`, default `en-US-AriaNeural`).
 
-`--audio` synthesises each line once with [edge-tts](https://pypi.org/project/edge-tts/)
-(online, free) into a sibling `reader_audio/` folder; `--voice` picks the voice
-(default `ja-JP-NanamiNeural`).
-
-A companion **kanji writing-practice page** (copy each line cell-by-cell on a tablet,
-checked against KanjiVG stroke order) is generated the same way:
+### Copy-writing practice
 
 ```bash
 python -m manga_workbook.practice work/workbook.json <image_dir> -o practice.html
 ```
+Read each line, then copy it on a ruled writing sheet (stylus on a tablet, or
+printed). No stroke-order validation — Latin script has none — with an optional
+faint "trace" of the model line.
 
-Every generated output — PDF and both HTML pages — carries a build-info footer/colophon
-(git commit, exercise RNG seed, run settings, environment) so any stray file can be
-traced back to the build that produced it.
+### Anki deck
+
+```bash
+python -m manga_workbook.anki work/workbook.json -o deck.apkg
+```
+Vocabulary cards (English → Spanish) and sentence cards (English line → Spanish).
+
+Every generated output carries a build-info footer/colophon (git commit, RNG seed,
+run settings, environment) so any stray file traces back to the build that made it.
 
 ## Layout
 
 ```
 manga_workbook/        # decoupled core pipeline (no web deps)
-  pcleaner_runner.py  # pcleaner OCR + clean wrappers (per-job cache isolation)
-  language.py         # fugashi: furigana HTML + POS extraction
-  furigana.py         # okurigana-aware reading placement
-  workbook.py          # assemble workbook data + chapter vocab
+  pcleaner_runner.py  # EasyOCR (boxes+text) + pcleaner clean (erase bubbles)
+  panels.py           # panel detection + Western (LTR) reading order
+  language.py         # spaCy: tokenize / lemma / POS word extraction
+  dictionary.py       # offline FreeDict en->es glosses (data/en-es.json)
+  level.py            # wordfreq -> CEFR-style level band
+  translate.py        # opus-mt-en-es line translation
+  workbook.py         # assemble workbook data + chapter vocab
   exercises.py        # offline study drills (seeded by chapter name)
+  llm.py              # optional DeepSeek / claude refinement (en->es)
   render.py           # workbook -> PDF (WeasyPrint)
   reader.py           # workbook -> interactive HTML reader (optional audio)
-  practice.py         # workbook -> kanji writing-practice HTML (KanjiVG strokes)
-  meta.py             # build provenance: commit, seed, settings (PDF + HTML)
+  practice.py         # workbook -> copy-writing HTML
+  anki.py             # workbook -> Anki .apkg
+  meta.py             # build provenance (PDF + HTML)
   pipeline.py         # orchestrate; CLI entrypoint
+  data/en-es.json     # prebuilt FreeDict eng-spa glosses
 app.py                # Flask frontend: upload images -> PDF
+data/build_dict.py    # one-time builder for data/en-es.json
 ```
 
-The cloned `PanelCleaner/`, `manga-ocr/`, `furigana/` folders are **not used** (the
-tools are pulled from PyPI) and can be deleted.
+## Data & licensing
+
+The bundled `manga_workbook/data/en-es.json` is built from the
+[FreeDict](https://freedict.org/) + [WikDict](http://www.wikdict.com/) `eng-spa`
+dictionary (CC-BY-SA 3.0; base data from Wiktionary via DBnary). Rebuild it with
+`python data/build_dict.py <eng-spa.tei>`.

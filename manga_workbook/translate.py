@@ -1,19 +1,13 @@
-"""Offline JA->EN translation via Helsinki-NLP/opus-mt-ja-en (CPU, no API key)."""
+"""Offline EN->ES translation via Helsinki-NLP/opus-mt-en-es (CPU/GPU, no API key)."""
 import html
 import re
 from collections import Counter
 from functools import lru_cache
 
-from .dictionary import gloss as _gloss
-
-MODEL = "Helsinki-NLP/opus-mt-ja-en"
+MODEL = "Helsinki-NLP/opus-mt-en-es"
 
 _TAG = re.compile(r"</?[a-zA-Z][^>]*>")
-_JA = re.compile(r"[぀-ヿ㐀-鿿々]")  # hiragana/katakana/kanji/々
-_KATA_ONLY = re.compile(r"^[゠-ヿ゠ー・\s]+$")
-_STAGE = re.compile(r"^[\(\[][^)\]]*[\)\]]$")  # invented "(Laughter)" / "[Music]"
-# opus-mt-ja-en hallucination artifacts: it emits these no matter the input.
-_ARTIFACTS = ("hugo barra", "speaking native language", "speaking in foreign language")
+_LETTER = re.compile(r"[A-Za-zÀ-ÿ]")  # any Latin letter (incl. accented)
 
 
 def _clean(s: str) -> str:
@@ -28,15 +22,9 @@ def _clean(s: str) -> str:
     return s.strip()
 
 
-def _is_sfx(s: str) -> bool:
-    # Short katakana-only line JMdict doesn't know -> sound effect (ガーッ, ドォン);
-    # opus-mt only hallucinates on these. Real loanwords (ドラゴン) are in JMdict, kept.
-    return len(s) <= 4 and bool(_KATA_ONLY.match(s)) and not _gloss(s)
-
-
 def _translatable(s: str) -> bool:
-    # Needs real Japanese; pure punctuation/digits/latin (……, ！？, ＸＸ) and SFX skip.
-    return bool(_JA.search(s)) and not _is_sfx(s)
+    # Needs real letters; pure punctuation/digits ("...", "!?", "123") skip.
+    return bool(_LETTER.search(s))
 
 
 def _collapse_repeats(s: str) -> str:
@@ -51,8 +39,8 @@ def _collapse_repeats(s: str) -> str:
 
 
 def _degenerate(s: str) -> bool:
-    # A phrase looped many times ("it's a tree, it's a tree, ...") or output with
-    # very low word variety -> the translation failed; better blank than garbage.
+    # A phrase looped many times or output with very low word variety -> the
+    # translation failed; better blank than garbage.
     chunks = [c.strip().rstrip(",.!?").lower() for c in re.split(r"[.!?,]\s*", s) if c.strip()]
     if chunks and max(Counter(chunks).values()) >= 5:
         return True
@@ -61,9 +49,7 @@ def _degenerate(s: str) -> bool:
 
 
 def _sane(out: str) -> str:
-    # Reject degenerate output: known artifacts, invented stage directions, loops.
-    if any(a in out.lower() for a in _ARTIFACTS) or _STAGE.match(out.strip()):
-        return ""
+    # Reject degenerate output (loops / low variety).
     if _degenerate(out):
         return ""
     return _collapse_repeats(out).strip()
@@ -79,7 +65,8 @@ def _pipe():
 
 
 def translate_lines(lines):
-    """Translate a list of dialogue lines. Returns a list of EN strings (same length).
+    """Translate a list of dialogue lines EN->ES. Returns a list of ES strings
+    (same length).
 
     Batched in one call so the model sees the page together (better than one-by-one),
     while still mapping each source line to its own translation.

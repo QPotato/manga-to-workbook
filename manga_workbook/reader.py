@@ -1,10 +1,11 @@
 """Interactive HTML reader generated from a workbook.
 
-A browser study view (vs the print PDF): each page's panel with its dialogue,
-a global furigana toggle (hide readings to quiz yourself), per-line English
-reveal, and optional per-line audio. Vocabulary summary with JMdict glosses and
-JLPT badges. Self-contained HTML (inline images); audio, if requested, is
-synthesised once with edge-tts (online, free) into a sibling folder.
+A browser study view (vs the print PDF): each page's panel with its dialogue, a
+global "show translation" toggle (hide the Spanish to quiz comprehension), per-line
+Spanish reveal, and optional per-line audio of the English. Vocabulary summary with
+en->es glosses and CEFR-style level badges. Self-contained HTML (inline images);
+audio, if requested, is synthesised once with edge-tts (online, free) into a sibling
+folder.
 """
 import asyncio
 import base64
@@ -15,7 +16,7 @@ from pathlib import Path
 
 from .meta import footer_html
 
-DEFAULT_VOICE = "ja-JP-NanamiNeural"
+DEFAULT_VOICE = "en-US-AriaNeural"
 _MAX_EDGE = 900
 
 
@@ -74,7 +75,7 @@ def build_reader_html(workbook, original_dir, out_html, audio=False,
 
     audio_rel, amap = "", {}
     if audio:
-        texts = [d["plain"] for p in pages_in for d in p["dialog"]]
+        texts = [d["text"] for p in pages_in for d in p["dialog"]]
         texts += [e["word"] for cat in ("verbs", "nouns", "adjectives")
                   for e in workbook.get("summary_vocab", {}).get(cat, [])]
         audio_rel = out_html.stem + "_audio"
@@ -82,13 +83,13 @@ def build_reader_html(workbook, original_dir, out_html, audio=False,
 
     pages = []
     for p in pages_in:
-        lines = [{"fur": d["furigana"], "en": d.get("en", ""),
-                  "audio": amap.get(d["plain"].strip()) if audio else None}
+        lines = [{"text": d["text"], "es": d.get("es", ""),
+                  "audio": amap.get(d["text"].strip()) if audio else None}
                  for d in p["dialog"]]
         pages.append({"img": _data_uri(original_dir / p["filename"]), "lines": lines})
 
     sv = workbook.get("summary_vocab", {})
-    vocab = {cat: [{"fur": e["furigana"], "en": e.get("en", ""), "jlpt": e.get("jlpt", ""),
+    vocab = {cat: [{"word": e["word"], "es": e.get("es", ""), "level": e.get("level", ""),
                     "audio": amap.get(e["word"].strip()) if audio else None}
                    for e in sv.get(cat, [])] for cat in ("verbs", "nouns", "adjectives")}
 
@@ -115,30 +116,30 @@ def _main():
     print(f"\nwrote {a.out}")
 
 
-_TMPL = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+_TMPL = r"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Manga reader</title>
+<title>Lector de cómic</title>
 <style>
  *{box-sizing:border-box} body{font-family:system-ui,sans-serif;margin:0;color:#1a1a1a;background:#f6f6f4}
  #bar{position:sticky;top:0;background:#fff;border-bottom:1px solid #ddd;padding:8px 14px;display:flex;gap:18px;align-items:center;z-index:5}
  #bar label{font-size:14px;cursor:pointer} .wrap{max-width:900px;margin:0 auto;padding:14px}
  .page{margin:0 0 26px} .page img{max-width:100%;display:block;margin:0 auto;border:1px solid #ccc;background:#fff}
  .line{display:flex;align-items:baseline;gap:8px;padding:7px 4px;border-bottom:1px solid #eee}
- .ja{font-size:21px;flex:1} ruby rt{font-size:.5em;color:#666}
- body.hide-furi rt{visibility:hidden}
+ .src{font-size:20px;flex:1}
  .line button{font-size:12px;border:1px solid #ccc;background:#fafafa;border-radius:4px;padding:2px 7px;cursor:pointer;color:#444}
- .en{color:#557;font-size:15px;margin-left:6px} .en.hidden{display:none}
+ .es{color:#557;font-size:15px;margin-left:6px;display:none}
+ .es.shown{display:inline} body.all-es .es{display:inline}
  h2{border-bottom:2px solid #333;padding-bottom:2px;font-size:16px;margin:22px 0 8px}
  .chips{display:flex;flex-wrap:wrap;gap:7px}
  .chip{position:relative;background:#eef;border:1px solid #ccd;border-radius:5px;padding:3px 8px;display:inline-flex;flex-direction:column;align-items:flex-start}
- .chip .w{font-size:15px} .chip .g{font-size:11px;color:#667} .chip .lvl{position:absolute;top:-7px;right:-5px;font-size:9px;background:#fde;color:#a44;border:1px solid #e9b;border-radius:3px;padding:0 2px}
+ .chip .w{font-size:15px} .chip .g{font-size:11px;color:#667} .chip .lvl{position:absolute;top:-7px;right:-5px;font-size:9px;background:#def;color:#46a;border:1px solid #bcf;border-radius:3px;padding:0 2px}
  .chip button{margin-top:3px;font-size:11px;border:1px solid #ccd;background:#fff;border-radius:4px;cursor:pointer}
  .gitem{padding:6px 0;border-bottom:1px solid #eee;font-size:15px} .gitem b{font-size:18px}
 </style></head><body>
 <div id="bar">
   <strong id="title"></strong>
-  <label><input type="checkbox" id="furi" checked> furigana</label>
-  <span style="color:#999;font-size:12.5px">Tap ▶ to listen, EN to reveal meaning.</span>
+  <label><input type="checkbox" id="alles"> mostrar traducción</label>
+  <span style="color:#999;font-size:12.5px">Pulsa ▶ para escuchar, ES para ver la traducción.</span>
 </div>
 <div class="wrap"><div id="content"></div>
   <div id="grammar"></div>
@@ -152,23 +153,23 @@ const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g
 
 function lineEl(l){
   const d = document.createElement("div"); d.className = "line";
-  let h = `<span class="ja">${l.fur}</span>`;
+  let h = `<span class="src">${esc(l.text)}</span>`;
   if(l.audio) h += `<button data-a="${l.audio}">▶</button>`;
-  if(l.en) h += `<button class="ten">EN</button><span class="en hidden">${esc(l.en)}</span>`;
+  if(l.es) h += `<button class="tes">ES</button><span class="es">${esc(l.es)}</span>`;
   d.innerHTML = h;
   const ab = d.querySelector("button[data-a]"); if(ab) ab.onclick = () => play(ab.dataset.a);
-  const tb = d.querySelector(".ten"); if(tb) tb.onclick = () => d.querySelector(".en").classList.toggle("hidden");
+  const tb = d.querySelector(".tes"); if(tb) tb.onclick = () => d.querySelector(".es").classList.toggle("shown");
   return d;
 }
 function chip(v){
   const c = document.createElement("span"); c.className = "chip";
-  c.innerHTML = (v.jlpt?`<span class="lvl">${esc(v.jlpt)}</span>`:"") +
-    `<span class="w">${v.fur}</span>` + (v.en?`<span class="g">${esc(v.en)}</span>`:"");
+  c.innerHTML = (v.level?`<span class="lvl">${esc(v.level)}</span>`:"") +
+    `<span class="w">${esc(v.word)}</span>` + (v.es?`<span class="g">${esc(v.es)}</span>`:"");
   if(v.audio){ const b=document.createElement("button"); b.textContent="▶"; b.onclick=()=>play(v.audio); c.appendChild(b); }
   return c;
 }
 function render(){
-  document.getElementById("title").textContent = DATA.chapter || "Reader";
+  document.getElementById("title").textContent = DATA.chapter || "Lector";
   const content = document.getElementById("content");
   DATA.pages.forEach(p=>{
     const pg = document.createElement("div"); pg.className = "page";
@@ -178,13 +179,13 @@ function render(){
   });
   const g = document.getElementById("grammar");
   (DATA.grammar || []).forEach((it,i)=>{
-    if(i===0){ const h=document.createElement("h2"); h.textContent="文法 grammar"; g.appendChild(h); }
+    if(i===0){ const h=document.createElement("h2"); h.textContent="Gramática"; g.appendChild(h); }
     const d=document.createElement("div"); d.className="gitem";
     d.innerHTML = `<b>${esc(it.point)}</b> <span style="color:#667">${esc(it.explain)}</span>`
                   + `<div style="color:#445;margin-top:2px">${esc(it.example)}</div>`;
     g.appendChild(d);
   });
-  const cats = {verbs:"動詞 verbs", nouns:"名詞 nouns", adjs:"形容詞 adjectives"};
+  const cats = {verbs:"Verbos", nouns:"Sustantivos", adjs:"Adjetivos"};
   const key = {verbs:"verbs", nouns:"nouns", adjs:"adjectives"};
   for(const id in cats){
     const box = document.getElementById(id); const items = DATA.vocab[key[id]] || [];
@@ -194,7 +195,7 @@ function render(){
     items.forEach(v=>wrap.appendChild(chip(v))); box.appendChild(wrap);
   }
 }
-document.getElementById("furi").onchange = e => document.body.classList.toggle("hide-furi", !e.target.checked);
+document.getElementById("alles").onchange = e => document.body.classList.toggle("all-es", e.target.checked);
 render();
 </script></body></html>"""
 

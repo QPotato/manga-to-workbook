@@ -1,7 +1,7 @@
 """Render workbook data -> PDF via WeasyPrint. Self-contained HTML/CSS, embeds images.
 
-Each manga page produces two consecutive sheets: an images sheet (original panel +
-blank practice copy) and a dialogue sheet (furigana + English). The vocabulary
+Each comic page produces two consecutive sheets: an images sheet (original panel +
+blank practice copy) and a dialogue sheet (English + Spanish). The vocabulary
 summary follows, then the exercises and answer-key appendix.
 """
 import base64
@@ -13,18 +13,9 @@ from weasyprint import HTML
 CSS = """
 @page { size: A4 landscape; margin: 10mm; }
 * { box-sizing: border-box; }
-body { font-family: "Noto Sans CJK JP", "Noto Serif CJK JP", "Yu Gothic",
-       "Meiryo", "MS Gothic", sans-serif; color: #111; margin: 0; }
-/* Furigana above the kanji. WeasyPrint has no native ruby layout (it renders
-   <rt> inline after the base), so place the reading with absolute positioning:
-   the <ruby> is an inline-block anchor on the normal baseline and the <rt> is
-   centered just above it. Containers holding ruby get extra line-height below so
-   the reading doesn't collide with the line above. */
-ruby { display: inline-block; position: relative; }
-ruby rt { position: absolute; bottom: 100%; left: -1em; right: -1em;
-          margin-bottom: -0.3em; font-size: 0.5em; line-height: 1; font-weight: normal;
-          text-align: center; white-space: nowrap; }
-.dialog .ja, .v .jp, .ex .item, .q .item, .answers .item { line-height: 2.0; }
+body { font-family: "Segoe UI", "Noto Sans", "DejaVu Sans", Arial, sans-serif;
+       color: #111; margin: 0; }
+.dialog .src, .v .word, .ex .item, .q .item, .answers .item { line-height: 1.6; }
 h1 { font-size: 22pt; }
 .summary h1 { margin-bottom: 12px; }
 /* Vocabulary list: block entries flowed in CSS multi-columns. Avoids the flex/
@@ -34,16 +25,17 @@ h1 { font-size: 22pt; }
 .vocab-group h2 .sub { font-size: 10pt; color: #888; font-weight: normal; }
 .vocab-cols { column-count: 4; column-gap: 18px; }
 .v { break-inside: avoid; margin: 0 0 7px; }
-.v .jp { font-size: 12pt; }
-.v .en { display: block; font-size: 8.5pt; color: #667; }
+.v .word { font-size: 12pt; }
+.v .es { display: block; font-size: 8.5pt; color: #667; }
 .v .lvl { font-size: 7pt; border: 1px solid; border-radius: 3px; padding: 0 3px; margin-left: 5px;
-          vertical-align: 1px; background: #ffe1e1; color: #c0271f; border-color: #f0a3a0; }
-/* JLPT level colours: N5 blue, N4 green, N3 yellow, N2 orange, N1 / outside-JLPT red */
-.v .lvl.n5 { background: #e1ecff; color: #1d4ed8; border-color: #9db8f0; }
-.v .lvl.n4 { background: #e3f6e3; color: #1f8a3b; border-color: #9ad6a3; }
-.v .lvl.n3 { background: #fff6cc; color: #8a7000; border-color: #e6cf6b; }
-.v .lvl.n2 { background: #ffe9d1; color: #c2620e; border-color: #f0bd86; }
-.v .lvl.n1 { background: #ffe1e1; color: #c0271f; border-color: #f0a3a0; }
+          vertical-align: 1px; background: #eee; color: #555; border-color: #ccc; }
+/* CEFR-style level colours: A1 blue (easiest) .. C2 red (hardest). */
+.v .lvl.a1 { background: #e1ecff; color: #1d4ed8; border-color: #9db8f0; }
+.v .lvl.a2 { background: #e3f6e3; color: #1f8a3b; border-color: #9ad6a3; }
+.v .lvl.b1 { background: #fff6cc; color: #8a7000; border-color: #e6cf6b; }
+.v .lvl.b2 { background: #ffe9d1; color: #c2620e; border-color: #f0bd86; }
+.v .lvl.c1 { background: #ffe1e1; color: #c0271f; border-color: #f0a3a0; }
+.v .lvl.c2 { background: #fbd5d5; color: #a01818; border-color: #e88; }
 .page { page-break-after: always; }
 .page:last-child { page-break-after: auto; }
 .images { display: flex; gap: 8px; }
@@ -52,8 +44,8 @@ h1 { font-size: 22pt; }
 .dialog { font-size: 12pt; }
 .dialog .line { display: flex; gap: 12px; margin: 4px 0; padding-bottom: 4px;
                 border-bottom: 1px solid #eee; break-inside: avoid; }
-.dialog .ja { flex: 1 1 50%; }
-.dialog .en { flex: 1 1 50%; color: #555; }
+.dialog .src { flex: 1 1 50%; }
+.dialog .tgt { flex: 1 1 50%; color: #555; }
 .ex h1 { margin-bottom: 12px; }
 .ex .sec { break-inside: avoid; margin-bottom: 14px; }
 .ex .sec h2 { font-size: 14pt; border-bottom: 2px solid #333; padding-bottom: 2px; margin: 0 0 2px; }
@@ -102,25 +94,25 @@ def _wordlist(words):
         return '<div class="v" style="color:#aaa">—</div>'
     out = []
     for w in words:
-        gloss = f'<span class="en">{_esc(w["en"])}</span>' if w.get("en") else ""
-        lvl = (f'<span class="lvl {_esc(w["jlpt"].lower())}">{_esc(w["jlpt"])}</span>'
-               if w.get("jlpt") else "")
-        out.append(f'<div class="v"><span class="jp">{w["furigana"]}</span>{lvl}{gloss}</div>')
+        gloss = f'<span class="es">{_esc(w["es"])}</span>' if w.get("es") else ""
+        lvl = (f'<span class="lvl {_esc(w["level"].lower())}">{_esc(w["level"])}</span>'
+               if w.get("level") else "")
+        out.append(f'<div class="v"><span class="word">{_esc(w["word"])}</span>{lvl}{gloss}</div>')
     return "".join(out)
 
 
-def _vocab_group(jp, en, words):
-    return (f'<div class="vocab-group"><h2>{jp} <span class="sub">{en}</span></h2>'
+def _vocab_group(es_title, en_sub, words):
+    return (f'<div class="vocab-group"><h2>{es_title} <span class="sub">{en_sub}</span></h2>'
             f'<div class="vocab-cols">{_wordlist(words)}</div></div>')
 
 
 def _summary_section(vocab):
     return (
         '<section class="summary page">'
-        '<h1>Vocabulary Summary 語彙</h1>'
-        f'{_vocab_group("動詞", "Verbs", vocab["verbs"])}'
-        f'{_vocab_group("名詞", "Nouns", vocab["nouns"])}'
-        f'{_vocab_group("形容詞", "Adjectives", vocab["adjectives"])}'
+        '<h1>Vocabulario <span style="font-size:14pt;color:#888">Vocabulary</span></h1>'
+        f'{_vocab_group("Verbos", "Verbs", vocab["verbs"])}'
+        f'{_vocab_group("Sustantivos", "Nouns", vocab["nouns"])}'
+        f'{_vocab_group("Adjetivos", "Adjectives", vocab["adjectives"])}'
         '</section>')
 
 
@@ -130,7 +122,7 @@ def _grammar_section(items):
         f'<span style="color:#666">{_esc(g["explain"])}</span>'
         f'<div style="color:#444;margin-top:2px">{_esc(g["example"])}</div></li>'
         for g in items)
-    return f'<section class="ex page"><h1>Grammar 文法</h1><ol>{rows}</ol></section>'
+    return f'<section class="ex page"><h1>Gramática</h1><ol>{rows}</ol></section>'
 
 
 def _images(orig, cleaned):
@@ -147,8 +139,8 @@ def _images(orig, cleaned):
 
 def _dialog(dialog):
     lines = "".join(
-        f'<div class="line"><div class="ja">{d["furigana"]}</div>'
-        f'<div class="en">{_esc(d.get("en", ""))}</div></div>'
+        f'<div class="line"><div class="src">{_esc(d["text"])}</div>'
+        f'<div class="tgt">{_esc(d.get("es", ""))}</div></div>'
         for d in dialog
     ) or '<div class="line" style="color:#aaa">—</div>'
     return f'<div class="dialog">{lines}</div>'
@@ -171,7 +163,7 @@ def _exercise_section(ex):
         layout = "grid" if len(s["items"]) > 10 else "list"
         blocks.append(f'<div class="sec"><h2>{s["title"]}</h2>{instr}'
                       f'<ol class="{layout}">{items}</ol></div>')
-    return f'<section class="ex page"><h1>Exercises 練習</h1>{"".join(blocks)}</section>'
+    return f'<section class="ex page"><h1>Ejercicios</h1>{"".join(blocks)}</section>'
 
 
 def _answers_section(ex):
@@ -179,18 +171,18 @@ def _answers_section(ex):
     for s in ex["answers"]:
         items = "".join(f'<li class="item">{it}</li>' for it in s["items"])
         blocks.append(f'<div class="sec"><h2>{s["title"]}</h2><ol class="grid">{items}</ol></div>')
-    return f'<section class="ex answers page"><h1>Answer Key 解答</h1>{"".join(blocks)}</section>'
+    return f'<section class="ex answers page"><h1>Solucionario</h1>{"".join(blocks)}</section>'
 
 
 def _questions_section(questions):
-    # The "final section with questions about what happens" (CLAUDE.md), with
-    # writing space; the answer key for these is appended after the exercise key.
+    # The "final section with questions about what happens", with writing space;
+    # the answer key for these is appended after the exercise key.
     items = "".join(
         f'<li class="item"><span class="qn">{i}.</span> {_esc(q["q"])}<div class="write"></div></li>'
         for i, q in enumerate(questions, 1)
     )
-    return ('<section class="ex q page"><h1>Comprehension 内容理解</h1>'
-            '<div class="instr">Answer in English or Japanese.</div>'
+    return ('<section class="ex q page"><h1>Comprensión</h1>'
+            '<div class="instr">Responde en español.</div>'
             f'<ol class="list">{items}</ol></section>')
 
 
@@ -199,7 +191,7 @@ def _question_answers(questions):
         f'<li class="item"><span class="qn">{i}.</span> {_esc(q["q"])} &mdash; {_esc(q["a"])}</li>'
         for i, q in enumerate(questions, 1)
     )
-    return ('<section class="ex answers page"><h1>Comprehension answers 解答</h1>'
+    return ('<section class="ex answers page"><h1>Comprensión — respuestas</h1>'
             f'<ol>{items}</ol></section>')
 
 
@@ -234,7 +226,7 @@ def _wrap(inner, meta=None):
 
 def render_pdf(workbook: dict, original_dir, out_pdf):
     original_dir = Path(original_dir)
-    # Manga first (images sheet + dialogue sheet per page), then the vocabulary
+    # Pages first (images sheet + dialogue sheet per page), then the vocabulary
     # summary, then the exercises and answer-key appendix.
     body = [_page_sections(p, original_dir) for p in workbook["pages"]]
     body.append(_summary_section(workbook["summary_vocab"]))

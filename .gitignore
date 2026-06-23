@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 work/
+work_*/
 out/
 CLAUDE.md
 booklet.pdf
@@ -14,8 +15,12 @@ PanelCleaner/
 manga-ocr/
 furigana/
 
+# raw FreeDict download used only to (re)build manga_workbook/data/en-es.json
+data/_freedict/
+
 # copyrighted sample manga — do not publish
 dungeon-meshi-chapter-1/
 manga/
+english/
 
 DEEPSEEK_API_KEY

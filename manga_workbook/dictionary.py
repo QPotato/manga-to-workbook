@@ -1,52 +1,59 @@
-"""Offline JA->EN dictionary glosses via jamdict (JMdict).
+"""Offline EN->ES dictionary glosses from the bundled FreeDict+WikDict eng-spa data.
 
-Used for vocabulary lists / the answer key. opus-mt is a *sentence* translator,
-so single dictionary words came out as sentence-like nonsense (茸 -> "I'll take
-care of it", スライム -> "Slide", 内臓 -> "Immaculate"). jamdict returns real
-dictionary glosses instead. A lookup miss returns "" so the workbook shows
-nothing rather than a confidently-wrong gloss.
+Used for vocabulary lists / the answer key. opus-mt is a *sentence* translator, so
+single dictionary words come out as sentence-like nonsense; a real bilingual
+dictionary returns proper glosses instead. The data is flattened to
+``data/en-es.json`` (``headword -> {pos: [spanish, ...]}``, grouped by part of
+speech and pre-sorted by Spanish frequency) by ``data/build_dict.py``, so a verb
+gets its verb gloss and a noun its noun gloss. A lookup miss returns "" so the
+workbook shows nothing rather than a confidently-wrong gloss.
 """
+import json
 from functools import lru_cache
+from pathlib import Path
 
-_jam = None
+_DATA_PATH = Path(__file__).parent / "data" / "en-es.json"
+_dict = None
 
-# workbook category -> substring expected in a JMdict sense's part-of-speech,
-# so e.g. 円 (noun) prefers the "yen" sense over a verb homograph.
-_POS_KEYWORD = {"verbs": "verb", "adjectives": "adjective", "nouns": "noun"}
-
-
-def _jamdict():
-    global _jam
-    if _jam is None:
-        from jamdict import Jamdict
-        _jam = Jamdict()
-    return _jam
+# workbook category -> POS bucket key in the data file.
+_CAT2POS = {"verbs": "v", "nouns": "n", "adjectives": "a"}
+_POS_ORDER = ("v", "n", "a", "x")  # fallback merge order when the POS is absent
 
 
-def _senses(entries, keyword):
-    """All senses across entries, POS-matching ones first."""
-    pref, rest = [], []
-    for e in entries:
-        for s in e.senses:
-            match = keyword and any(keyword in p for p in s.pos)
-            (pref if match else rest).append(s)
-    return pref + rest
+def _load() -> dict:
+    global _dict
+    if _dict is None:
+        try:
+            _dict = json.loads(_DATA_PATH.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            # Build it once with: python data/build_dict.py <eng-spa.tei>
+            _dict = {}
+    return _dict
 
 
 @lru_cache(maxsize=8192)
 def gloss(word: str, category: str | None = None, max_glosses: int = 3) -> str:
-    """Short EN gloss for a dictionary word, or "" if JMdict has no exact entry."""
+    """Short Spanish gloss for an English word, or "" if the dictionary lacks it.
+
+    ``category`` ("verbs"/"nouns"/"adjectives") selects the matching part-of-speech
+    sense; when it is absent or empty for the word, all senses are merged (the
+    requested POS first) so a gloss is still returned.
+    """
     if not word:
         return ""
-    try:
-        res = _jamdict().lookup(word, strict_lookup=True)  # exact kanji/kana match
-    except Exception:
+    entry = _load().get(word.lower())
+    if not entry:
         return ""
-    if not res.entries:
-        return ""
-    keyword = _POS_KEYWORD.get(category or "")
-    for s in _senses(res.entries, keyword):
-        texts = [g.text for g in s.gloss if g.text]
-        if texts:
-            return "; ".join(texts[:max_glosses])
-    return ""
+    if isinstance(entry, list):  # tolerate the old flat schema
+        entry = {"x": entry}
+    key = _CAT2POS.get(category or "")
+    if key and entry.get(key):
+        senses = entry[key]
+    else:  # merge all buckets, requested POS first, de-duped
+        seen, senses = set(), []
+        for k in ([key] if key else []) + [k for k in _POS_ORDER if k != key]:
+            for g in entry.get(k, []):
+                if g not in seen:
+                    seen.add(g)
+                    senses.append(g)
+    return "; ".join(senses[:max_glosses])

@@ -1,12 +1,12 @@
-"""Optional LLM enhancement. Two providers:
+"""Optional LLM enhancement (English -> Spanish). Two providers:
 
   * DeepSeek API (default) — text-only (no vision). Uses the key in env
     DEEPSEEK_API_KEY or a `DEEPSEEK_API_KEY` file in the project root. It refines
-    the rough opus-mt English into natural translations and writes comprehension
-    questions + grammar notes. It does NOT change the OCR'd Japanese (it can't see
-    the page).
+    the rough opus-mt Spanish into natural translations, lightly fixes obvious
+    English OCR typos from context, and writes comprehension questions + grammar
+    notes in Spanish.
   * Claude Code CLI (`claude -p`) — local login, has vision via the Read tool, so
-    it can also correct the Japanese OCR text from the page image.
+    it can also correct the English OCR text against the page image.
 
 Both are opt-in and cached into workbook.json so re-renders never re-call them.
 Output is requested as plain JSON and parsed here.
@@ -152,39 +152,40 @@ def _run_json(prompt, model, allow_read, timeout=_TIMEOUT):
 
 # --- OCR correction / translation ----------------------------------------------
 
-# Claude (vision): fix the Japanese OCR text from the page image AND translate.
+# Claude (vision): fix the English OCR text from the page image AND translate to ES.
 _CORRECT_CLAUDE = (
-    "You are a Japanese manga OCR corrector and translator.\n"
-    "Look at the manga page image with the Read tool: {path}\n"
+    "You are an English comic OCR corrector and English-to-Spanish translator.\n"
+    "Look at the comic page image with the Read tool: {path}\n"
     "Below is a draft OCR of its text boxes as `id: text`. For EACH box return the "
-    "id, the exact Japanese text as printed in the image (fix OCR errors such as "
-    "ソ/ツ or 拓/取 and garbled stylized text; keep okurigana and punctuation), and a "
-    "natural concise English translation (empty string for pure sound effects). "
+    "id, the exact English text as printed in the image (fix OCR errors such as "
+    "l/I, rn/m, 0/O and garbled stylized lettering; keep punctuation), and a "
+    "natural concise Spanish translation (empty string for pure sound effects). "
     "Return EVERY id exactly once.\n"
     'Output ONLY JSON, no prose, no markdown fences: '
-    '{{"boxes":[{{"id":1,"text":"...","en":"..."}}]}}\n\n'
+    '{{"boxes":[{{"id":1,"text":"...","es":"..."}}]}}\n\n'
     "Draft OCR boxes:\n{draft}"
 )
 
-# DeepSeek (text-only): keep the Japanese as-is, just produce natural English.
+# DeepSeek (text-only): lightly fix obvious English OCR typos and translate to ES.
 _TRANSLATE_DEEPSEEK = (
-    "You are a Japanese-to-English manga translator. Below are a manga page's text "
-    "boxes as `id: japanese`, in reading order. For EACH box return its id and a "
-    "natural, concise English translation that reads well in context (use an empty "
-    "string for pure sound effects/onomatopoeia). Do NOT change the Japanese. "
+    "You are an English-to-Spanish comic translator. Below are a comic page's text "
+    "boxes as `id: english`, in reading order. For EACH box return its id, a cleaned "
+    "`text` (fix only obvious OCR typos you can infer from context; otherwise keep "
+    "it verbatim), and a natural, concise Spanish translation `es` that reads well in "
+    "context (use an empty string for pure sound effects/onomatopoeia). "
     "Return EVERY id exactly once.\n"
     'Output ONLY JSON, no prose, no markdown fences: '
-    '{{"boxes":[{{"id":1,"en":"..."}}]}}\n\n'
+    '{{"boxes":[{{"id":1,"text":"...","es":"..."}}]}}\n\n'
     "Text boxes:\n{draft}"
 )
 
 
 def correct_pages(pages, model=DEFAULT_MODEL, on_progress=None):
     """pages: list of (filename, image_path, [{"id","text"}, ...]).
-    Returns {filename: {id: {"text","en"}}}. Pages with no boxes are skipped.
+    Returns {filename: {id: {"text","es"}}}. Pages with no boxes are skipped.
 
-    Claude reads the image and may rewrite the Japanese `text`. DeepSeek is
-    text-only: it keeps the original Japanese and only improves the `en`."""
+    Claude reads the image and may rewrite the English `text`. DeepSeek is
+    text-only: it lightly fixes obvious typos and produces the Spanish `es`."""
     deepseek = _is_deepseek(model)
     out = {}
     total = len(pages)
@@ -192,30 +193,24 @@ def correct_pages(pages, model=DEFAULT_MODEL, on_progress=None):
         if boxes:
             draft = "\n".join(f'{b["id"]}: {b["text"]}' for b in boxes)
             # A single page that the LLM can't return valid JSON for must not abort
-            # the whole book: skip it (keep the original OCR + opus-mt EN) and go on.
+            # the whole book: skip it (keep the original OCR + opus-mt ES) and go on.
+            originals = {b["id"]: b["text"] for b in boxes}
             try:
                 if deepseek:
                     prompt = _TRANSLATE_DEEPSEEK.format(draft=draft)
                     data = _run_json(prompt, model, allow_read=False)
-                    originals = {b["id"]: b["text"] for b in boxes}
-                    fixes = {}
-                    for b in data.get("boxes", []):
-                        try:
-                            bid = int(b["id"])
-                        except (KeyError, ValueError, TypeError):
-                            continue
-                        # keep the OCR Japanese unchanged; only the translation is new
-                        fixes[bid] = {"text": originals.get(bid, ""), "en": str(b.get("en", ""))}
                 else:
                     prompt = _CORRECT_CLAUDE.format(path=os.path.abspath(img_path), draft=draft)
                     data = _run_json(prompt, model, allow_read=True)
-                    fixes = {}
-                    for b in data.get("boxes", []):
-                        try:
-                            fixes[int(b["id"])] = {"text": str(b.get("text", "")),
-                                                   "en": str(b.get("en", ""))}
-                        except (KeyError, ValueError, TypeError):
-                            continue
+                fixes = {}
+                for b in data.get("boxes", []):
+                    try:
+                        bid = int(b["id"])
+                    except (KeyError, ValueError, TypeError):
+                        continue
+                    # Fall back to the original OCR text when the LLM omits/blanks it.
+                    text = str(b.get("text", "")).strip() or originals.get(bid, "")
+                    fixes[bid] = {"text": text, "es": str(b.get("es", ""))}
             except RuntimeError as e:
                 print(f"  LLM correction failed for {fname}, keeping original: {e}")
                 fixes = {}
@@ -225,14 +220,14 @@ def correct_pages(pages, model=DEFAULT_MODEL, on_progress=None):
     return out
 
 
-# --- Comprehension questions (in Japanese) -------------------------------------
+# --- Comprehension questions (in Spanish) --------------------------------------
 
 _QUESTIONS = (
-    "You are a Japanese-language teacher. Given a manga chapter's dialogue "
-    "(Japanese, with English where available), write {n} comprehension questions "
-    "about what happens, the characters, and their motivations, ordered easy to "
-    "hard, each with a short answer. Write BOTH the questions AND the answers in "
-    "JAPANESE. Base answers only on the given text.\n"
+    "You are an English teacher for Spanish-speaking students. Given an English "
+    "comic chapter's dialogue (with a Spanish gloss where available), write {n} "
+    "comprehension questions about what happens, the characters, and their "
+    "motivations, ordered easy to hard, each with a short answer. Write BOTH the "
+    "questions AND the answers in SPANISH. Base answers only on the given text.\n"
     'Output ONLY JSON, no prose, no markdown fences: '
     '{{"items":[{{"question":"...","answer":"..."}}]}}\n\n'
     "Chapter: {chapter}\nDialogue:\n{body}"
@@ -240,11 +235,11 @@ _QUESTIONS = (
 
 
 def comprehension(chapter, lines, model=DEFAULT_MODEL, n=8):
-    """lines: list of (ja, en) across the chapter. Returns [{"q","a"}, ...]
-    with both question and answer in Japanese."""
+    """lines: list of (text_en, es) across the chapter. Returns [{"q","a"}, ...]
+    with both question and answer in Spanish."""
     if not lines:
         return []
-    body = "\n".join(f"- {ja}" + (f"  ({en})" if en else "") for ja, en in lines)
+    body = "\n".join(f"- {en}" + (f"  ({es})" if es else "") for en, es in lines)
     data = _run_json(_QUESTIONS.format(n=n, chapter=chapter, body=body),
                      model, allow_read=False)
     return [{"q": str(q.get("question", "")), "a": str(q.get("answer", ""))}
@@ -252,10 +247,11 @@ def comprehension(chapter, lines, model=DEFAULT_MODEL, n=8):
 
 
 _GRAMMAR = (
-    "You are a Japanese teacher. From the chapter's dialogue, pick the {n} most "
-    "useful grammar points for a learner (particles, verb/adjective forms, set "
-    "patterns). For each give: the point (e.g. 〜ている), a one-line English "
-    "explanation, and one example sentence taken from the dialogue.\n"
+    "You are an English teacher for Spanish-speaking students. From the chapter's "
+    "English dialogue, pick the {n} most useful English grammar points for a learner "
+    "(verb tenses, phrasal verbs, prepositions, set patterns). For each give: the "
+    "point (e.g. present perfect), a one-line explanation IN SPANISH, and one example "
+    "sentence taken from the dialogue.\n"
     'Output ONLY JSON, no prose, no markdown fences: '
     '{{"items":[{{"point":"...","explain":"...","example":"..."}}]}}\n\n'
     "Chapter: {chapter}\nDialogue:\n{body}"
@@ -263,10 +259,10 @@ _GRAMMAR = (
 
 
 def grammar(chapter, lines, model=DEFAULT_MODEL, n=6):
-    """lines: list of (ja, en). Returns [{"point","explain","example"}, ...]."""
+    """lines: list of (text_en, es). Returns [{"point","explain","example"}, ...]."""
     if not lines:
         return []
-    body = "\n".join(f"- {ja}" for ja, _ in lines)
+    body = "\n".join(f"- {en}" for en, _ in lines)
     data = _run_json(_GRAMMAR.format(n=n, chapter=chapter, body=body),
                      model, allow_read=False)
     return [{"point": str(q.get("point", "")), "explain": str(q.get("explain", "")),

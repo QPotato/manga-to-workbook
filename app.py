@@ -18,9 +18,9 @@ app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500 MB upload cap
 
 JOBS: dict = {}  # job_id -> {"q": Queue, "pdf": Path|None, "error": str|None}
 
-PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+PAGE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Manga -> Study Workbook</title>
+<title>Comic -> English Study Workbook</title>
 <style>
  body{font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;color:#222}
  h1{font-size:22px} p{color:#555}
@@ -37,14 +37,14 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
  select{padding:6px;font-size:14px}
  .hint{font-size:12px;color:#888;margin:4px 0 0}
 </style></head><body>
-<h1>Manga &rarr; Japanese Study Workbook</h1>
-<p>Drop the chapter's images (ordered by filename). You get a printable PDF workbook.</p>
+<h1>Comic &rarr; English Study Workbook <span style="font-size:14px;color:#888">para hispanohablantes</span></h1>
+<p>Drop the English comic pages (ordered by filename). You get a printable PDF workbook with Spanish glosses.</p>
 <form id="f">
   <div class="drop" id="drop">Click or drop images here
     <input id="file" type="file" name="images" accept="image/*" multiple hidden></div>
   <div id="list"></div>
   <div id="opts">
-    <label><input type="checkbox" id="llm"> Improve with AI &mdash; natural translations, plus Japanese comprehension questions &amp; grammar notes</label>
+    <label><input type="checkbox" id="llm"> Improve with AI &mdash; natural Spanish translations, plus Spanish comprehension questions &amp; grammar notes</label>
     <div id="llmopts">
       <label>Model
         <select id="model">
@@ -55,9 +55,9 @@ PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
           <option value="haiku">Claude Haiku (also fixes OCR)</option>
         </select>
       </label>
-      <p class="hint">DeepSeek (API key) improves translations and adds Japanese Q&amp;A + grammar.
+      <p class="hint">DeepSeek (API key) improves Spanish translations and adds Spanish Q&amp;A + grammar.
       Claude models use your local <code>claude</code> CLI login and can additionally correct the
-      Japanese OCR from the page image. Cost is billed to whichever account you pick.</p>
+      English OCR from the page image. Cost is billed to whichever account you pick.</p>
     </div>
   </div>
   <button id="go" type="submit" disabled>Build workbook PDF</button>
