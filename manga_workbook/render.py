@@ -70,6 +70,12 @@ h1 { font-size: 22pt; }
 .answers .item { font-size: 10pt; padding: 2px 0; }
 .q .item { padding: 4px 0 8px; }
 .q .write { height: 56px; border-bottom: 1px solid #ccc; margin-top: 4px; }
+/* Build-info colophon: provenance for debugging a generated workbook. */
+.colophon h1 { font-size: 16pt; color: #555; }
+.colophon .meta { font-family: "Consolas", "Courier New", monospace; font-size: 9pt; color: #555; }
+.colophon .row { display: flex; gap: 12px; padding: 2px 0; border-bottom: 1px solid #f0f0f0; }
+.colophon .row .k { flex: 0 0 130px; color: #999; }
+.colophon .row .v { flex: 1 1 auto; word-break: break-all; }
 """
 
 
@@ -197,8 +203,32 @@ def _question_answers(questions):
             f'<ol>{items}</ol></section>')
 
 
-def _wrap(inner):
-    return (f"<html><head><meta charset='utf-8'><style>{CSS}</style></head>"
+def _meta_section(meta):
+    """Build-info colophon: commit, RNG seed, settings, environment (debug aid)."""
+    s = meta.get("settings", {})
+    rows = [
+        ("Generated", meta.get("generated", "")),
+        ("Commit", meta.get("commit", "")),
+        ("Seed", meta.get("seed", "")),
+        ("Chapter", s.get("chapter", "")),
+        ("Pages", s.get("pages", "")),
+        ("LLM", str(s.get("model")) if s.get("with_llm") else "off"),
+        ("Reuse cache", "yes" if s.get("reuse") else "no"),
+        ("Python", meta.get("python", "")),
+        ("Platform", meta.get("platform", "")),
+    ]
+    body = "".join(
+        f'<div class="row"><span class="k">{_esc(str(k))}</span>'
+        f'<span class="v">{_esc(str(v))}</span></div>'
+        for k, v in rows if v not in ("", None)
+    )
+    return f'<section class="page colophon"><h1>Build info</h1><div class="meta">{body}</div></section>'
+
+
+def _wrap(inner, meta=None):
+    generator = (f"<meta name='generator' content='manga-to-workbook "
+                 f"{_esc(meta.get('commit', ''))}'>" if meta else "")
+    return (f"<html><head><meta charset='utf-8'>{generator}<style>{CSS}</style></head>"
             f"<body>{inner}</body></html>")
 
 
@@ -221,5 +251,8 @@ def render_pdf(workbook: dict, original_dir, out_pdf):
         body.append(_answers_section(ex))
     if questions:
         body.append(_question_answers(questions))
-    HTML(string=_wrap("".join(body))).write_pdf(str(out_pdf))
+    meta = workbook.get("meta")
+    if meta:
+        body.append(_meta_section(meta))
+    HTML(string=_wrap("".join(body), meta)).write_pdf(str(out_pdf))
     return out_pdf

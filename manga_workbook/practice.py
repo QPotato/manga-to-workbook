@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import kanjivg
 from .furigana import is_kanji
+from .meta import footer_html
 
 _WEB = Path(__file__).parent / "web"
 _MAX_EDGE = 900   # downscale inlined page images
@@ -71,6 +72,7 @@ def build_practice_html(workbook, original_dir, out_html, cache_dir, on_progress
     html = (_TMPL
             .replace("/*__MATCHER__*/", matcher)
             .replace("/*__DATA__*/", "DATA=" + json.dumps(data, ensure_ascii=False)))
+    html = html.replace("</body>", footer_html(workbook.get("meta")) + "</body>")
     out_html.write_text(html, encoding="utf-8")
     return out_html
 

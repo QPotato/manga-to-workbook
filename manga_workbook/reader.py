@@ -13,6 +13,8 @@ import io
 import json
 from pathlib import Path
 
+from .meta import footer_html
+
 DEFAULT_VOICE = "ja-JP-NanamiNeural"
 _MAX_EDGE = 900
 
@@ -93,6 +95,7 @@ def build_reader_html(workbook, original_dir, out_html, audio=False,
     data = {"chapter": workbook.get("chapter", ""), "pages": pages, "vocab": vocab,
             "grammar": workbook.get("grammar", []), "audioDir": audio_rel}
     html = _TMPL.replace("/*__DATA__*/", "DATA=" + json.dumps(data, ensure_ascii=False))
+    html = html.replace("</body>", footer_html(workbook.get("meta")) + "</body>")
     out_html.write_text(html, encoding="utf-8")
     return out_html
 

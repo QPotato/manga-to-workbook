@@ -82,6 +82,34 @@ Web (drop images → download PDF):
 python app.py   # http://127.0.0.1:5000
 ```
 
+### Interactive HTML reader
+
+Besides the print PDF, the pipeline's data (`workbook.json`, written to the work dir)
+can be turned into a self-contained **browser study reader**: each page's panel with
+its dialogue, a global furigana toggle (hide readings to quiz yourself), per-line
+English reveal, the vocabulary summary with JLPT badges, and optional per-line audio.
+One HTML file, images inlined, no server:
+
+```bash
+python -m manga_workbook.reader work/workbook.json <image_dir> -o reader.html
+python -m manga_workbook.reader work/workbook.json <image_dir> -o reader.html --audio
+```
+
+`--audio` synthesises each line once with [edge-tts](https://pypi.org/project/edge-tts/)
+(online, free) into a sibling `reader_audio/` folder; `--voice` picks the voice
+(default `ja-JP-NanamiNeural`).
+
+A companion **kanji writing-practice page** (copy each line cell-by-cell on a tablet,
+checked against KanjiVG stroke order) is generated the same way:
+
+```bash
+python -m manga_workbook.practice work/workbook.json <image_dir> -o practice.html
+```
+
+Every generated output — PDF and both HTML pages — carries a build-info footer/colophon
+(git commit, exercise RNG seed, run settings, environment) so any stray file can be
+traced back to the build that produced it.
+
 ## Layout
 
 ```
@@ -90,7 +118,11 @@ manga_workbook/        # decoupled core pipeline (no web deps)
   language.py         # fugashi: furigana HTML + POS extraction
   furigana.py         # okurigana-aware reading placement
   workbook.py          # assemble workbook data + chapter vocab
+  exercises.py        # offline study drills (seeded by chapter name)
   render.py           # workbook -> PDF (WeasyPrint)
+  reader.py           # workbook -> interactive HTML reader (optional audio)
+  practice.py         # workbook -> kanji writing-practice HTML (KanjiVG strokes)
+  meta.py             # build provenance: commit, seed, settings (PDF + HTML)
   pipeline.py         # orchestrate; CLI entrypoint
 app.py                # Flask frontend: upload images -> PDF
 ```

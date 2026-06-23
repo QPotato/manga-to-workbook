@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 
+from .meta import build_meta
 from .workbook import apply_corrections, build_workbook
 from .pcleaner_runner import clean_dir, list_image_names, ocr_dir
 from .render import render_pdf
@@ -61,6 +62,7 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
 
     workbook = build_workbook(ordered, ocr_pages, cleaned_map, chapter=chapter, on_page=on_page)
 
+    model = None
     if with_llm:
         from . import llm
 
@@ -91,6 +93,14 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
             log(f"AI: grammar notes skipped: {e}")
             workbook["grammar"] = []
         emit(f_quest, "AI stage done.")
+
+    workbook["meta"] = build_meta({
+        "chapter": chapter,
+        "pages": n,
+        "with_llm": with_llm,
+        "model": model,
+        "reuse": reuse,
+    })
 
     (work_dir / "workbook.json").write_text(
         json.dumps(workbook, ensure_ascii=False, indent=2), encoding="utf-8"
