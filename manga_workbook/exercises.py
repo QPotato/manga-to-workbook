@@ -12,6 +12,8 @@ the learner studies is the English text. Output: {"sections": [...], "answers":
 import random
 import re
 
+from .language import is_real_word
+
 BLANK = '<span class="blank"></span>'
 # Common English prepositions for the preposition drill (the analog of the JP
 # particle exercise — the small closed class learners must place correctly).
@@ -32,8 +34,10 @@ def _blank_word(text: str, word: str, placeholder: str) -> str:
 
 def _real_word_token(t) -> bool:
     """A content word safe to blank as a fill-in answer: a noun, verb or adjective
-    of at least 3 letters (skips function words, punctuation, short tokens)."""
-    return t["p"] in ("NOUN", "VERB", "ADJ") and len(t["s"]) >= 3 and t["s"].isalpha()
+    of at least 3 letters, real (in the frequency corpus, so OCR garble like
+    "becalse" is skipped)."""
+    return (t["p"] in ("NOUN", "VERB", "ADJ") and len(t["s"]) >= 3
+            and t["s"].isalpha() and is_real_word(t["l"]))
 
 
 def _all_lines(wb):
@@ -74,7 +78,7 @@ def build_exercises(wb):
     base, seen = [], set()
     pool = [t for _, d in lines for t in d["tokens"]
             if t["p"] in ("VERB", "NOUN", "ADJ") and t["s"].lower() != t["l"]
-            and len(t["s"]) >= 3 and t["s"].isalpha()]
+            and len(t["s"]) >= 3 and t["s"].isalpha() and is_real_word(t["l"])]
     rng.shuffle(pool)
     for t in pool:
         key = t["s"].lower()
