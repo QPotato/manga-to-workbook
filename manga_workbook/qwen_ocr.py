@@ -104,6 +104,55 @@ def _correct_one(image_path, boxes) -> dict | None:
     return fixes
 
 
+_TRANSLATE_PROMPT = (
+    "Translate each numbered English comic line into natural, concise Spanish "
+    "(neutral). Use normal sentence case — do NOT shout in all-caps even when the "
+    "source is uppercase. Keep proper names. Return ONLY JSON, no markdown: "
+    '{{"items":[{{"id":1,"es":"..."}}]}}\n\nLines:\n{draft}'
+)
+
+
+def translate_lines(lines):
+    """Translate English lines -> Spanish with the local Qwen model (text-only,
+    one batched call). Returns a list of ES strings the same length as `lines`;
+    blank/non-text lines stay "". The "full Qwen" alternative to opus-mt/DeepSeek."""
+    import torch
+
+    out = [""] * len(lines)
+    idx = [i for i, ln in enumerate(lines) if ln and ln.strip()]
+    if not idx:
+        return out
+    try:
+        model, proc = _model()
+    except Exception as e:
+        print(f"  Qwen translate unavailable: {e}")
+        return out
+    draft = "\n".join(f"{j}: {lines[i]}" for j, i in enumerate(idx, 1))
+    msgs = [{"role": "user", "content": [
+        {"type": "text", "text": _TRANSLATE_PROMPT.format(draft=draft)}]}]
+    text = proc.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+    inp = proc(text=[text], return_tensors="pt").to(model.device)
+    try:
+        with torch.inference_mode():
+            o = model.generate(**inp, max_new_tokens=_MAX_NEW_TOKENS, do_sample=False)
+        res = proc.batch_decode([x[len(i):] for i, x in zip(inp.input_ids, o)],
+                                skip_special_tokens=True)[0]
+        m = _JSON.search(res)
+        data = json.loads(m.group(1)) if m else {}
+        arr = data.get("items", []) if isinstance(data, dict) else data
+        got = {}
+        for it in arr:
+            try:
+                got[int(it["id"])] = str(it.get("es", "")).strip()
+            except (KeyError, ValueError, TypeError):
+                continue
+        for j, i in enumerate(idx, 1):
+            out[i] = got.get(j, "")
+    except Exception as e:
+        print(f"  Qwen translate failed for a page: {e}")
+    return out
+
+
 def correct_pages(input_dir, ocr_pages, on_progress=None, skip_color=True) -> dict:
     """Rewrite each page's box text with Qwen's reading. Mutates and returns
     ocr_pages ({filename: [box,...]}). Boxes Qwen blanks as noise are dropped; a

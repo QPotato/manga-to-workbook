@@ -86,22 +86,27 @@ def _finalize(wb):
 
 
 def build_workbook(ordered_files, ocr_pages, cleaned_map, chapter="chapter",
-                  translate=True, on_page=None):
+                  translate=True, translate_fn=None, on_page=None):
     """ordered_files: list of original filenames in page order.
     ocr_pages: {filename: [box,...]}.  cleaned_map: {filename: cleaned_path}.
 
+    translate_fn(lines)->[es,...] supplies the translator; defaults to offline
+    opus-mt when `translate` is set. Pass another (e.g. qwen_ocr.translate_lines)
+    to translate with a different engine.
+
     Returns dict: {chapter, summary_vocab, pages:[...], exercises}.
     """
-    if translate:
+    if translate_fn is None and translate:
         from .translate import translate_lines
+        translate_fn = translate_lines
 
     pages = []
     for pi, fname in enumerate(ordered_files, 1):
         boxes = ocr_pages.get(fname, [])
         page = _make_page(fname, cleaned_map.get(fname, ""),
                           [(b["text"], "", None) for b in boxes])
-        if translate and page["dialog"]:
-            ess = translate_lines([d["text"] for d in page["dialog"]])
+        if translate_fn and page["dialog"]:
+            ess = translate_fn([d["text"] for d in page["dialog"]])
             for d, es in zip(page["dialog"], ess):
                 d["es"] = es
         if on_page:

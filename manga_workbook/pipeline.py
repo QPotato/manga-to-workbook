@@ -13,11 +13,14 @@ def list_images(input_dir: Path):
 
 
 def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
-        with_llm=False, llm_model=None, reuse=False, rtl=True, qwen_ocr=False):
+        with_llm=False, llm_model=None, reuse=False, rtl=True, qwen_ocr=False,
+        qwen_translate=False):
     """progress(frac 0..1, msg) is called at each stage boundary and per page.
     qwen_ocr inserts a (slow, GPU) Qwen2.5-VL pass that re-reads each page and
-    fixes EasyOCR's text errors before analysis. with_llm adds the DeepSeek
-    translation-refine + Spanish Q&A stage at the back."""
+    fixes EasyOCR's text errors before analysis. qwen_translate ("full Qwen") also
+    translates with Qwen instead of opus-mt (implies qwen_ocr). with_llm adds the
+    DeepSeek translation-refine + Spanish Q&A stage at the back."""
+    qwen_ocr = qwen_ocr or qwen_translate  # translating needs the corrected text
     state = {"frac": 0.0}
 
     def emit(frac, msg):
@@ -51,6 +54,7 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
         on_progress=lambda d, t: emit(0.02 + (o_end - 0.02) * d / t, f"OCR: page {d}/{t}"),
     )
 
+    _qocr = None
     if qwen_ocr:
         from . import qwen_ocr as _qocr
 
@@ -59,7 +63,10 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
             input_dir, ocr_pages,
             on_progress=lambda d, t: emit(o_end + (q_end - o_end) * d / t, f"Qwen OCR: page {d}/{t}"),
         )
-        _qocr.unload()  # free VRAM before the translation model loads
+        # Persist corrected boxes so a later --reuse run skips the slow Qwen pass.
+        (work_dir / "ocr.json").write_text(json.dumps(ocr_pages, ensure_ascii=False), encoding="utf-8")
+        if not qwen_translate:
+            _qocr.unload()  # free VRAM for the opus-mt translation model
 
     emit(q_end, "Erasing speech bubbles (cleaning panels)...")
     cleaned_map = clean_dir(
@@ -72,7 +79,11 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
     def on_page(i, total):
         emit(c_end + (a_end - c_end) * (i / total), f"Analyzing page {i}/{total}...")
 
-    workbook = build_workbook(ordered, ocr_pages, cleaned_map, chapter=chapter, on_page=on_page)
+    translate_fn = _qocr.translate_lines if qwen_translate else None
+    workbook = build_workbook(ordered, ocr_pages, cleaned_map, chapter=chapter,
+                              translate_fn=translate_fn, on_page=on_page)
+    if qwen_translate:
+        _qocr.unload()  # all Qwen work done; free VRAM
 
     model = None
     if with_llm:
@@ -144,6 +155,8 @@ if __name__ == "__main__":
     ap.add_argument("--qwen-ocr", action="store_true",
                     help="re-read pages with the local Qwen2.5-VL vision model to fix OCR errors "
                          "on stylized lettering (GPU; weights cached under HF_HOME, e.g. E:/hf_cache)")
+    ap.add_argument("--qwen-translate", action="store_true",
+                    help="also translate with Qwen instead of opus-mt (\"full Qwen\"; implies --qwen-ocr)")
     a = ap.parse_args()
     run(a.input_dir, a.work, a.out, a.chapter, with_llm=a.with_llm, llm_model=a.model,
-        reuse=a.reuse, rtl=not a.ltr, qwen_ocr=a.qwen_ocr)
+        reuse=a.reuse, rtl=not a.ltr, qwen_ocr=a.qwen_ocr, qwen_translate=a.qwen_translate)

@@ -98,6 +98,22 @@ download to the HuggingFace cache — **set `HF_HOME`** (e.g. `E:/hf_cache`) to 
 them off the system drive. Colour pages (covers/splashes) are skipped. It adds
 ~10 s/page, so it's opt-in.
 
+### Translation: opus-mt (default) · `--qwen-translate` · `--with-llm` (DeepSeek)
+
+After the (corrected) English is read, the Spanish translation comes from one of:
+
+| option | engine | quality | needs |
+|---|---|---|---|
+| *(default)* | opus-mt-en-es | rough; occasional bad misses | offline |
+| `--qwen-translate` | local Qwen2.5-VL | decent, fully offline; echoes ALL-CAPS, literal | GPU |
+| `--with-llm` | DeepSeek API | **best** — natural & idiomatic | `DEEPSEEK_API_KEY` |
+
+Benchmarked on Chainsaw Man: DeepSeek (`El cadáver se venderá bien en el mercado
+negro`) > Qwen (`EL CUERPO LLEVARÁ UN DINERO GRANDE...`) > opus-mt (which fumbles
+idioms, e.g. *finder's fee → "semen de la flor"*). For the best result use
+**`--qwen-ocr --with-llm`** (clean English + natural Spanish); `--qwen-translate`
+("full Qwen") is the best **fully-offline** path.
+
 ### Interactive HTML reader
 
 ```bash
