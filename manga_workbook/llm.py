@@ -1,31 +1,29 @@
-"""Optional LLM enhancement (English -> Spanish). Two providers:
+"""Optional LLM enhancement (English -> Spanish) via the DeepSeek API.
 
-  * DeepSeek API (default) — text-only (no vision). Uses the key in env
-    DEEPSEEK_API_KEY or a `DEEPSEEK_API_KEY` file in the project root. It refines
-    the rough opus-mt Spanish into natural translations, lightly fixes obvious
-    English OCR typos from context, and writes comprehension questions + grammar
-    notes in Spanish.
-  * Claude Code CLI (`claude -p`) — local login, has vision via the Read tool, so
-    it can also correct the English OCR text against the page image.
+DeepSeek (text-only) uses the key in env DEEPSEEK_API_KEY or a `DEEPSEEK_API_KEY`
+file in the project root. It refines the rough opus-mt Spanish into natural
+translations, lightly fixes obvious English OCR typos from context, and writes
+comprehension questions + grammar notes in Spanish.
 
-Both are opt-in and cached into workbook.json so re-renders never re-call them.
-Output is requested as plain JSON and parsed here.
+Vision OCR correction (re-reading the page image) is handled separately by the
+local Qwen2.5-VL model in ``qwen_ocr.py`` — the old `claude -p` vision path was
+dropped (deprecated, too costly).
+
+Opt-in and cached into workbook.json so re-renders never re-call it. Output is
+requested as plain JSON and parsed here.
 """
 import json
 import os
 import re
-import shutil
 import socket
-import subprocess
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-# Model menu (webapp dropdown / CLI --model). DeepSeek first => default.
+# Model menu (webapp dropdown / CLI --model).
 DEEPSEEK_MODELS = ("deepseek-chat", "deepseek-reasoner")
-CLAUDE_MODELS = ("opus", "sonnet", "haiku")
-ALLOWED_MODELS = DEEPSEEK_MODELS + CLAUDE_MODELS
+ALLOWED_MODELS = DEEPSEEK_MODELS
 DEFAULT_MODEL = "deepseek-chat"
 
 _TIMEOUT = 300  # seconds per page / chapter call
@@ -33,10 +31,6 @@ _NET_RETRIES = 3  # transient network failures (timeouts, dropped connections)
 _JSON = re.compile(r"(\{.*\}|\[.*\])", re.S)
 
 _DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
-
-
-def _is_deepseek(model):
-    return model in DEEPSEEK_MODELS
 
 
 # --- DeepSeek (OpenAI-compatible HTTP API) -------------------------------------
@@ -94,34 +88,11 @@ def _deepseek_chat(prompt, model, timeout=_TIMEOUT):
     raise RuntimeError(f"DeepSeek network error after {_NET_RETRIES} attempts: {last}")
 
 
-# --- Claude Code CLI -----------------------------------------------------------
-
-def _claude_bin():
-    exe = shutil.which("claude")
-    if not exe:
-        raise RuntimeError("`claude` CLI not found on PATH. Install Claude Code and log in.")
-    return exe
-
-
-def _claude_run(prompt, model, allow_read, timeout=_TIMEOUT):
-    args = [_claude_bin(), "-p", "--model", model, "--output-format", "text"]
-    if allow_read:
-        args += ["--allowedTools", "Read"]  # pre-approve image reads, no prompt
-    proc = subprocess.run(args, input=prompt, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout)
-    if proc.returncode != 0:
-        raise RuntimeError(f"claude failed: {(proc.stderr or proc.stdout)[-800:]}")
-    return proc.stdout
-
-
-def _run(prompt, model, allow_read, timeout=_TIMEOUT):
-    """Dispatch a text prompt to the selected provider. allow_read (image access)
-    applies only to Claude; DeepSeek is text-only and ignores it."""
+def _run(prompt, model, timeout=_TIMEOUT):
+    """Dispatch a text prompt to DeepSeek (the only provider)."""
     if model not in ALLOWED_MODELS:
         raise ValueError(f"model must be one of {ALLOWED_MODELS}")
-    if _is_deepseek(model):
-        return _deepseek_chat(prompt, model, timeout)
-    return _claude_run(prompt, model, allow_read, timeout)
+    return _deepseek_chat(prompt, model, timeout)
 
 
 def _json_obj(text):
@@ -134,13 +105,13 @@ def _json_obj(text):
 _JSON_RETRIES = 3  # LLMs occasionally emit malformed/fenced JSON; re-ask a few times
 
 
-def _run_json(prompt, model, allow_read, timeout=_TIMEOUT):
+def _run_json(prompt, model, timeout=_TIMEOUT):
     """Call the LLM and parse its reply as JSON, retrying the whole call when the
     reply isn't valid JSON (DeepSeek in particular sometimes breaks the format).
     Re-raises the last parse error after _JSON_RETRIES attempts."""
     last = None
     for attempt in range(1, _JSON_RETRIES + 1):
-        text = _run(prompt, model, allow_read, timeout)
+        text = _run(prompt, model, timeout)
         try:
             return _json_obj(text)
         except (ValueError, json.JSONDecodeError) as e:  # JSONDecodeError subclasses ValueError
@@ -150,21 +121,7 @@ def _run_json(prompt, model, allow_read, timeout=_TIMEOUT):
     )
 
 
-# --- OCR correction / translation ----------------------------------------------
-
-# Claude (vision): fix the English OCR text from the page image AND translate to ES.
-_CORRECT_CLAUDE = (
-    "You are an English comic OCR corrector and English-to-Spanish translator.\n"
-    "Look at the comic page image with the Read tool: {path}\n"
-    "Below is a draft OCR of its text boxes as `id: text`. For EACH box return the "
-    "id, the exact English text as printed in the image (fix OCR errors such as "
-    "l/I, rn/m, 0/O and garbled stylized lettering; keep punctuation), and a "
-    "natural concise Spanish translation (empty string for pure sound effects). "
-    "Return EVERY id exactly once.\n"
-    'Output ONLY JSON, no prose, no markdown fences: '
-    '{{"boxes":[{{"id":1,"text":"...","es":"..."}}]}}\n\n'
-    "Draft OCR boxes:\n{draft}"
-)
+# --- OCR cleanup / translation -------------------------------------------------
 
 # DeepSeek (text-only): lightly fix obvious English OCR typos and translate to ES.
 _TRANSLATE_DEEPSEEK = (
@@ -184,9 +141,8 @@ def correct_pages(pages, model=DEFAULT_MODEL, on_progress=None):
     """pages: list of (filename, image_path, [{"id","text"}, ...]).
     Returns {filename: {id: {"text","es"}}}. Pages with no boxes are skipped.
 
-    Claude reads the image and may rewrite the English `text`. DeepSeek is
-    text-only: it lightly fixes obvious typos and produces the Spanish `es`."""
-    deepseek = _is_deepseek(model)
+    DeepSeek is text-only: it lightly fixes obvious typos in the English `text`
+    and produces the Spanish `es`. (Vision OCR correction is qwen_ocr's job.)"""
     out = {}
     total = len(pages)
     for i, (fname, img_path, boxes) in enumerate(pages, 1):
@@ -196,12 +152,7 @@ def correct_pages(pages, model=DEFAULT_MODEL, on_progress=None):
             # the whole book: skip it (keep the original OCR + opus-mt ES) and go on.
             originals = {b["id"]: b["text"] for b in boxes}
             try:
-                if deepseek:
-                    prompt = _TRANSLATE_DEEPSEEK.format(draft=draft)
-                    data = _run_json(prompt, model, allow_read=False)
-                else:
-                    prompt = _CORRECT_CLAUDE.format(path=os.path.abspath(img_path), draft=draft)
-                    data = _run_json(prompt, model, allow_read=True)
+                data = _run_json(_TRANSLATE_DEEPSEEK.format(draft=draft), model)
                 fixes = {}
                 for b in data.get("boxes", []):
                     try:
@@ -240,8 +191,7 @@ def comprehension(chapter, lines, model=DEFAULT_MODEL, n=8):
     if not lines:
         return []
     body = "\n".join(f"- {en}" + (f"  ({es})" if es else "") for en, es in lines)
-    data = _run_json(_QUESTIONS.format(n=n, chapter=chapter, body=body),
-                     model, allow_read=False)
+    data = _run_json(_QUESTIONS.format(n=n, chapter=chapter, body=body), model)
     return [{"q": str(q.get("question", "")), "a": str(q.get("answer", ""))}
             for q in data.get("items", [])]
 
@@ -263,7 +213,6 @@ def grammar(chapter, lines, model=DEFAULT_MODEL, n=6):
     if not lines:
         return []
     body = "\n".join(f"- {en}" for en, _ in lines)
-    data = _run_json(_GRAMMAR.format(n=n, chapter=chapter, body=body),
-                     model, allow_read=False)
+    data = _run_json(_GRAMMAR.format(n=n, chapter=chapter, body=body), model)
     return [{"point": str(q.get("point", "")), "explain": str(q.get("explain", "")),
              "example": str(q.get("example", ""))} for q in data.get("items", [])]

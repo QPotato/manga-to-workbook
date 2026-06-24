@@ -50,14 +50,11 @@ PAGE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
         <select id="model">
           <option value="deepseek-chat">DeepSeek Chat (default)</option>
           <option value="deepseek-reasoner">DeepSeek Reasoner</option>
-          <option value="sonnet">Claude Sonnet (also fixes OCR)</option>
-          <option value="opus">Claude Opus (also fixes OCR)</option>
-          <option value="haiku">Claude Haiku (also fixes OCR)</option>
         </select>
       </label>
       <p class="hint">DeepSeek (API key) improves Spanish translations and adds Spanish Q&amp;A + grammar.
-      Claude models use your local <code>claude</code> CLI login and can additionally correct the
-      English OCR from the page image. Cost is billed to whichever account you pick.</p>
+      To fix OCR errors on stylized lettering, run the CLI with <code>--qwen-ocr</code> (local
+      Qwen2.5-VL vision model, GPU).</p>
     </div>
   </div>
   <button id="go" type="submit" disabled>Build workbook PDF</button>

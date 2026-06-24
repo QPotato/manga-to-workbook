@@ -17,6 +17,10 @@ Flask==3.1.3
 pillow==12.2.0
 genanki==0.13.1         # Anki .apkg export
 edge-tts==7.2.8         # optional reader audio (online, free; not used by core)
+# Optional Qwen2.5-VL OCR-correction pass (--qwen-ocr): fixes EasyOCR errors on
+# stylized lettering. ~7GB weights; set HF_HOME (e.g. E:/hf_cache) before running.
+qwen-vl-utils==0.0.14
+accelerate==1.14.0
 # The en->es gloss dictionary ships prebuilt at manga_workbook/data/en-es.json.
 # Rebuild it from FreeDict eng-spa with: python data/build_dict.py <eng-spa.tei>
-# Optional LLM stage uses DeepSeek (DEEPSEEK_API_KEY) or the local `claude` CLI.
+# Optional LLM stage uses the DeepSeek API (DEEPSEEK_API_KEY).

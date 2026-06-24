@@ -80,9 +80,23 @@ python app.py   # http://127.0.0.1:5000
 ```
 
 Optional AI refinement (`--with-llm`): natural Spanish translations + Spanish
-comprehension questions & grammar notes, via the DeepSeek API
-(`DEEPSEEK_API_KEY`) or the local `claude` CLI (which can also correct the
-English OCR against the page image).
+comprehension questions & grammar notes via the DeepSeek API (`DEEPSEEK_API_KEY`).
+
+### Fixing OCR on stylized lettering (`--qwen-ocr`)
+
+EasyOCR reads clean lettering well but garbles grungy comic fonts (a systematic
+U→L: `you→yol`, `because→becalse`). The optional `--qwen-ocr` flag re-reads each
+page with a local **Qwen2.5-VL-3B** vision model and corrects the text while
+keeping EasyOCR's reading order — fixing those errors offline:
+
+```bash
+HF_HOME=E:/hf_cache python -m manga_workbook.pipeline <image_dir> -o workbook.pdf --qwen-ocr
+```
+
+Needs a CUDA GPU (~8 GB VRAM; runs in fp16, no 4-bit). The ~7 GB of weights
+download to the HuggingFace cache — **set `HF_HOME`** (e.g. `E:/hf_cache`) to keep
+them off the system drive. Colour pages (covers/splashes) are skipped. It adds
+~10 s/page, so it's opt-in.
 
 ### Interactive HTML reader
 
@@ -118,7 +132,8 @@ run settings, environment) so any stray file traces back to the build that made 
 ```
 manga_workbook/        # decoupled core pipeline (no web deps)
   pcleaner_runner.py  # EasyOCR (boxes+text) + pcleaner clean (erase bubbles)
-  panels.py           # panel detection + Western (LTR) reading order
+  qwen_ocr.py         # optional Qwen2.5-VL vision OCR-correction pass (--qwen-ocr)
+  panels.py           # panel detection + reading order (RTL manga / --ltr Western)
   language.py         # spaCy: tokenize / lemma / POS word extraction
   dictionary.py       # offline FreeDict en->es glosses (data/en-es.json)
   level.py            # wordfreq -> CEFR-style level band

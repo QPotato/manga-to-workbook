@@ -13,11 +13,11 @@ def list_images(input_dir: Path):
 
 
 def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
-        with_llm=False, llm_model=None, reuse=False, rtl=True):
+        with_llm=False, llm_model=None, reuse=False, rtl=True, qwen_ocr=False):
     """progress(frac 0..1, msg) is called at each stage boundary and per page.
-    When with_llm is set, the free stages are compressed to leave room for the
-    (slower) Claude correction + question stage; otherwise the budget is
-    OCR 40% / clean 35% / analyze 17% / render 8%."""
+    qwen_ocr inserts a (slow, GPU) Qwen2.5-VL pass that re-reads each page and
+    fixes EasyOCR's text errors before analysis. with_llm adds the DeepSeek
+    translation-refine + Spanish Q&A stage at the back."""
     state = {"frac": 0.0}
 
     def emit(frac, msg):
@@ -33,15 +33,17 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
     work_dir.mkdir(parents=True, exist_ok=True)
     chapter = chapter or input_dir.name
 
-    # Stage-end fractions: the LLM stage gets the back half when enabled.
+    # Stage-end fractions. The optional Qwen OCR pass takes a band [o_end, q_end]
+    # between detection and cleaning; the LLM Q&A stage gets the back half.
     if with_llm:
-        f_ocr, f_clean, f_analyze, f_correct, f_quest = 0.18, 0.33, 0.40, 0.85, 0.90
+        o_end, c_end, a_end, f_correct, f_quest = 0.18, 0.33, 0.40, 0.85, 0.90
     else:
-        f_ocr = f_clean = f_analyze = f_correct = f_quest = 0.0  # set below
+        o_end, c_end, a_end = (0.15, 0.60, 0.94) if qwen_ocr else (0.42, 0.77, 0.94)
+        f_correct = f_quest = 0.0
+    q_end = o_end + (c_end - o_end) * 0.7 if qwen_ocr else o_end
 
     ordered = list_images(input_dir)
     n = len(ordered)
-    o_end, c_end, a_end = (f_ocr, f_clean, f_analyze) if with_llm else (0.42, 0.77, 0.94)
 
     emit(0.02, f"Reading English text from {n} pages (OCR)...")
     ocr_pages = ocr_dir(
@@ -49,10 +51,20 @@ def run(input_dir, work_dir, out_pdf, chapter=None, log=print, progress=None,
         on_progress=lambda d, t: emit(0.02 + (o_end - 0.02) * d / t, f"OCR: page {d}/{t}"),
     )
 
-    emit(o_end, "Erasing speech bubbles (cleaning panels)...")
+    if qwen_ocr:
+        from . import qwen_ocr as _qocr
+
+        emit(o_end, "Qwen: correcting OCR text (vision model)...")
+        ocr_pages = _qocr.correct_pages(
+            input_dir, ocr_pages,
+            on_progress=lambda d, t: emit(o_end + (q_end - o_end) * d / t, f"Qwen OCR: page {d}/{t}"),
+        )
+        _qocr.unload()  # free VRAM before the translation model loads
+
+    emit(q_end, "Erasing speech bubbles (cleaning panels)...")
     cleaned_map = clean_dir(
         input_dir, work_dir / "cleaned", reuse=reuse,
-        on_progress=lambda d, t: emit(o_end + (c_end - o_end) * d / t, f"Cleaning: page {d}/{t}"),
+        on_progress=lambda d, t: emit(q_end + (c_end - q_end) * d / t, f"Cleaning: page {d}/{t}"),
     )
 
     emit(c_end, "Extracting words and translating to Spanish...")
@@ -123,12 +135,15 @@ if __name__ == "__main__":
     ap.add_argument("--with-llm", action="store_true",
                     help="Refine translations and add Spanish comprehension questions + grammar")
     ap.add_argument("--model", default=None,
-                    help="LLM model: deepseek-chat | deepseek-reasoner (DeepSeek API, default) "
-                         "| opus | sonnet | haiku (local claude CLI, also fixes OCR)")
+                    help="DeepSeek model for translation refine + Spanish Q&A: "
+                         "deepseek-chat (default) | deepseek-reasoner")
     ap.add_argument("--reuse", action="store_true",
                     help="reuse cached OCR/cleaned in the work dir (same inputs) instead of re-running")
     ap.add_argument("--ltr", action="store_true",
                     help="left-to-right reading order (Western comics); default is right-to-left (manga)")
+    ap.add_argument("--qwen-ocr", action="store_true",
+                    help="re-read pages with the local Qwen2.5-VL vision model to fix OCR errors "
+                         "on stylized lettering (GPU; weights cached under HF_HOME, e.g. E:/hf_cache)")
     a = ap.parse_args()
     run(a.input_dir, a.work, a.out, a.chapter, with_llm=a.with_llm, llm_model=a.model,
-        reuse=a.reuse, rtl=not a.ltr)
+        reuse=a.reuse, rtl=not a.ltr, qwen_ocr=a.qwen_ocr)
